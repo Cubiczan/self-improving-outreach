@@ -25,10 +25,17 @@ The system SHALL execute each lead through: research → score → draft → cri
 
 #### Scenario: Live web refresh before draft
 
-- GIVEN a You.com API key
+- GIVEN a You.com API key (or One You auth + `ONE_YOU_CONNECTION_KEY`)
 - WHEN a lead is processed
-- THEN Researcher SHALL call You.com Search and/or Research before Drafter runs
+- THEN Researcher SHALL call You.com Search and/or Research (via One `you` actions when that is the effective provider, otherwise the direct HTTP client) before Drafter runs
 - AND if You.com fails twice, Researcher SHALL degrade to cached ClickHouse/in-memory context and log `tool_failures`
+
+#### Scenario: Live web refresh via One
+
+- GIVEN One auth, `ONE_YOU_CONNECTION_KEY`, `MOCK_MODE=false`, and `RESEARCH_PROVIDER=auto`
+- WHEN a lead is processed
+- THEN Researcher SHALL execute One `you` Search/Research before Drafter runs
+- AND if that call fails twice, Researcher SHALL degrade to cached context and log `tool_failures`
 
 ### Requirement: Cubiczan brand constraints
 
