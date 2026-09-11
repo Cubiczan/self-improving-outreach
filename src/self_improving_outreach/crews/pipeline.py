@@ -117,7 +117,7 @@ class OutreachPipeline:
                 with tracer.span("scorer"):
                     score = score_lead(lead, self.store, research)
                 with tracer.span("drafter"):
-                    draft = self._maybe_crewai_draft(lead, research, score)
+                    draft = self._maybe_crewai_draft(lead, research, score, run.run_id)
                     if draft is None:
                         draft = draft_message(lead, self.store, self.channel)
                 with tracer.span("critic"):
@@ -244,14 +244,29 @@ class OutreachPipeline:
                 error=str(exc),
             )
 
-    def _maybe_crewai_draft(self, lead, research, score):
-        if not self.settings.use_crewai:
+    def _maybe_crewai_draft(self, lead, research, score, run_id: str = ""):
+        mode = self.settings.resolved_crewai_mode
+        self.tracer.event("crewai.mode", {"mode": mode})
+        if mode == "off":
             return None
+
+        def you_refresh(query: str) -> str:
+            return self.you.refresh_query(query, run_id=run_id, lead=lead)
+
         try:
             from self_improving_outreach.crews.crewai_adapter import run_crewai_draft
 
-            return run_crewai_draft(self.settings, lead, research, score, self.store, self.channel)
+            return run_crewai_draft(
+                self.settings,
+                lead,
+                research,
+                score,
+                self.store,
+                self.channel,
+                tracer=self.tracer,
+                you_refresh=you_refresh,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("CrewAI draft failed, using deterministic drafter: %s", exc)
-            self.tracer.event("crewai.fallback", {"error": str(exc)})
+            self.tracer.event("crewai.fallback", {"error": str(exc), "reason": "exception"})
             return None

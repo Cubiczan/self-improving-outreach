@@ -29,6 +29,17 @@ The system SHALL read `LLM_PROVIDER=boundless|openai` (default `openai`). When t
 - GIVEN `MOCK_MODE=true` and a Boundless or OpenAI key
 - WHEN a lead is drafted
 - THEN the deterministic mock crew runs and no provider secret is required
+- AND `resolved_crewai_mode` is `off` even if `CREWAI_MODE=full`
+
+### Requirement: CrewAI utilization mode
+
+The system SHALL read `CREWAI_MODE=off|draft|full`. Unset means `full` when `use_crewai` is true, otherwise `off`. `show-config` SHALL print the resolved mode, not secrets.
+
+#### Scenario: Default full when live
+
+- GIVEN `MOCK_MODE=false` and `OPENAI_API_KEY` or `BOUNDLESS_API_KEY`
+- WHEN Settings resolve
+- THEN `resolved_crewai_mode` is `full`
 
 ### Requirement: OpenAI-compatible runtime env
 

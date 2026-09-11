@@ -248,12 +248,29 @@ class ResilientYouCom:
             f"{lead.company} {lead.contact_name} {lead.title} CFO CIO finance close "
             "reconciliation treasury SOX material weakness"
         )
+        return self._search_with_retry(query, run_id=run_id, lead=lead)
+
+    def refresh_query(self, query: str, *, run_id: str, lead: Optional[Lead] = None) -> str:
+        """Mid-crew You.com search. Retry once, then cached / degraded text."""
+        return self._search_with_retry(query, run_id=run_id, lead=lead).as_text()
+
+    def _search_with_retry(
+        self,
+        query: str,
+        *,
+        run_id: str,
+        lead: Optional[Lead] = None,
+    ) -> ResearchBundle:
         last_error: Optional[Exception] = None
+        lead_id = lead.lead_id if lead else ""
         for attempt in (1, 2):
             try:
-                with self.tracer.span("you.com.search", {"attempt": attempt, "lead_id": lead.lead_id}):
+                with self.tracer.span(
+                    "you.com.search",
+                    {"attempt": attempt, "lead_id": lead_id, "query": query[:120]},
+                ):
                     bundle = self.client.search(query)
-                if bundle.as_text():
+                if bundle.as_text() and lead is not None:
                     self.store.save_cached_context(lead.lead_id, bundle.as_text())
                 return bundle
             except Exception as exc:  # noqa: BLE001 — failover must catch SDK/HTTP/mock
@@ -274,10 +291,14 @@ class ResilientYouCom:
                     "tool_failure",
                     {"tool": self.tool_name, "attempt": attempt, "error": str(exc)},
                 )
-        cached = self.store.cached_context(lead)
+        cached = self.store.cached_context(lead) if lead is not None else ""
         synthesis = cached or (
-            f"Degraded context for {lead.company}: title={lead.title}; "
-            f"industry={lead.industry}; signals={lead.signals}"
+            f"Degraded context for query={query}"
+            if lead is None
+            else (
+                f"Degraded context for {lead.company}: title={lead.title}; "
+                f"industry={lead.industry}; signals={lead.signals}"
+            )
         )
         return ResearchBundle(
             query=query,

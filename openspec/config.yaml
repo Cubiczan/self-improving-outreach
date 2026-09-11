@@ -1,7 +1,5 @@
 schema: spec-driven
 context: |
-  Cubiczan (not CubicZan) self-improving outreach/pipeline agents.
-  Founder: Sam/Shyam Desigan (sam@cubiczan.com).
-  Positioning: agentic CFO/CIO, governed multi-agent finance (close, reconciliation,
-  treasury, observability), 90-day material-weakness remediation.
-  This system drafts and learns. Marketing Hunter / Pipeline Scout own LinkedIn send.
+  Cubiczan (not CubicZan) Self Improving Outreach — any outbound sales, not CFO/CIO-only.
+  Example ICP/patterns in-repo are finance-flavored. CrewAI drafts prose inside workers;
+  Score and Learner stay deterministic. Pipeline Scout owns LinkedIn send.

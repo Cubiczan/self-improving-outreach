@@ -26,6 +26,7 @@ def _mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("BOUNDLESS_BASE_URL", raising=False)
     monkeypatch.delenv("BOUNDLESS_MODEL", raising=False)
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("CREWAI_MODE", raising=False)
     monkeypatch.delenv("LIVEKIT_API_KEY", raising=False)
     monkeypatch.delenv("LIVEKIT_API_SECRET", raising=False)
     monkeypatch.delenv("LIVEKIT_URL", raising=False)

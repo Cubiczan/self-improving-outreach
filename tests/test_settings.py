@@ -66,6 +66,32 @@ def test_mock_mode_ignores_boundless_key():
     settings = Settings(mock_mode=True, llm_provider="boundless", boundless_api_key="bai-test")
     assert settings.is_mock is True
     assert settings.use_crewai is False
+    assert settings.resolved_crewai_mode == "off"
+
+
+def test_default_crewai_mode_is_full_when_use_crewai():
+    settings = Settings(mock_mode=False, openai_api_key="sk-oai")
+    assert settings.use_crewai is True
+    assert settings.resolved_crewai_mode == "full"
+
+
+def test_crewai_mode_draft_and_off():
+    draft = Settings(mock_mode=False, openai_api_key="sk-oai", crewai_mode="draft")
+    assert draft.use_crewai is True
+    assert draft.resolved_crewai_mode == "draft"
+    off = Settings(mock_mode=False, openai_api_key="sk-oai", crewai_mode="off")
+    assert off.use_crewai is True
+    assert off.resolved_crewai_mode == "off"
+
+
+def test_mock_forces_crewai_mode_off_even_when_full_requested():
+    settings = Settings(mock_mode=True, openai_api_key="sk-oai", crewai_mode="full")
+    assert settings.resolved_crewai_mode == "off"
+
+
+def test_invalid_crewai_mode_rejected():
+    with pytest.raises(ValidationError):
+        Settings(crewai_mode="swarm")
 
 
 def test_invalid_llm_provider_rejected():
@@ -167,6 +193,7 @@ def test_public_settings_view_and_show_config_hide_secrets():
     assert view["should_learn_on_draft"] is True
     assert view["simulate_outcomes"] is True
     assert view["chp_lock_enabled"] is False
+    assert view["crewai_mode"] == "off"
 
     runner = CliRunner()
     result = runner.invoke(app, ["show-config"])

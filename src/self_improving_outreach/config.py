@@ -20,6 +20,7 @@ from self_improving_outreach.one_defaults import (
 DEFAULT_BOUNDLESS_BASE_URL = "https://api.inference.boundless.network/v1"
 DEFAULT_BOUNDLESS_MODEL = "glm-5.2"
 LLM_PROVIDERS = ("openai", "boundless")
+CREWAI_MODES = ("off", "draft", "full")
 RESEARCH_PROVIDERS = ("auto", "one", "you")
 SANDBOX_PROVIDERS = ("auto", "one", "daytona")
 
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     crewai_model: str = "gpt-4o-mini"
     crewai_verbose: bool = False
+    crewai_mode: str = ""
 
     llm_provider: str = "openai"
     boundless_api_key: Optional[str] = None
@@ -106,6 +108,16 @@ class Settings(BaseSettings):
         normalized = (value or "openai").strip().lower()
         if normalized not in LLM_PROVIDERS:
             raise ValueError("LLM_PROVIDER must be 'openai' or 'boundless'")
+        return normalized
+
+    @field_validator("crewai_mode")
+    @classmethod
+    def _normalize_crewai_mode(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized in ("", "auto"):
+            return ""
+        if normalized not in CREWAI_MODES:
+            raise ValueError("CREWAI_MODE must be 'off', 'draft', or 'full'")
         return normalized
 
     @field_validator("research_provider")
@@ -241,6 +253,15 @@ class Settings(BaseSettings):
         return not self.is_mock
 
     @property
+    def resolved_crewai_mode(self) -> str:
+        """Effective CrewAI utilization. Mock / no LLM keys stay ``off``."""
+        if self.is_mock or not self.has_llm_credentials:
+            return "off"
+        if self.crewai_mode:
+            return self.crewai_mode
+        return "full" if self.use_crewai else "off"
+
+    @property
     def should_learn_on_draft(self) -> bool:
         """Draft→Learner is opt-in for live; mock + SIMULATE_OUTCOMES still demos it."""
         if self.learn_on_draft or self.mock_learn_outcomes:
@@ -282,6 +303,7 @@ def public_settings_view(settings: Settings) -> dict[str, Any]:
         "clickup_configured": settings.clickup_configured,
         "clickup_list_id": settings.clickup_list_id,
         "crewai": settings.use_crewai,
+        "crewai_mode": settings.resolved_crewai_mode,
         "chp_lock_enabled": settings.resolved_chp_lock_enabled,
         "sample_queue": str(sample_queue_path()),
     }
