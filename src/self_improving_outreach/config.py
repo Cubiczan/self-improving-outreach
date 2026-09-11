@@ -10,6 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from self_improving_outreach.one_defaults import (
     DEFAULT_DAYTONA_CREATE_SANDBOX_ACTION_ID,
+    DEFAULT_DAYTONA_DOCKERFILE,
+    DEFAULT_DAYTONA_SNAPSHOT,
     DEFAULT_YOU_RESEARCH_ACTION_ID,
     DEFAULT_YOU_SEARCH_ACTION_ID,
 )
@@ -62,6 +64,8 @@ class Settings(BaseSettings):
     one_daytona_list_sandbox_action_id: Optional[str] = None
     one_daytona_delete_sandbox_action_id: Optional[str] = None
     one_daytona_sandbox_path_var: str = "sandboxIdOrName"
+    one_daytona_dockerfile: str = DEFAULT_DAYTONA_DOCKERFILE
+    one_daytona_snapshot: str = DEFAULT_DAYTONA_SNAPSHOT
 
     daytona_api_key: Optional[str] = None
     daytona_api_url: str = "https://app.daytona.io/api"
