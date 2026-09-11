@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     daytona_api_url: str = "https://app.daytona.io/api"
     daytona_otel_enabled: bool = False
     daytona_sandbox_runs: bool = False
+    daytona_target: Optional[str] = None
+    daytona_region: Optional[str] = None
 
     livekit_api_key: Optional[str] = None
     livekit_api_secret: Optional[str] = None
@@ -195,6 +197,15 @@ class Settings(BaseSettings):
         return "none"
 
     @property
+    def resolved_daytona_target(self) -> Optional[str]:
+        """SDK ``DaytonaConfig.target`` from ``DAYTONA_TARGET`` or ``DAYTONA_REGION``."""
+        for value in (self.daytona_target, self.daytona_region):
+            text = str(value).strip() if value is not None else ""
+            if text:
+                return text
+        return None
+
+    @property
     def research_live(self) -> bool:
         return self.effective_research_provider in {"one", "you"}
 
@@ -295,6 +306,7 @@ def public_settings_view(settings: Settings) -> dict[str, Any]:
         "clickhouse_configured": bool(settings.clickhouse_host),
         "daytona_configured": bool(settings.daytona_api_key),
         "daytona_sandbox_runs": settings.daytona_sandbox_runs,
+        "daytona_target": settings.resolved_daytona_target,
         "livekit_configured": bool(settings.livekit_api_key),
         "livekit_feedback_auto": settings.livekit_feedback_auto,
         "simulate_outcomes": settings.simulate_outcomes,

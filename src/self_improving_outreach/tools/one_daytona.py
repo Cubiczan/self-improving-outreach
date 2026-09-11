@@ -22,12 +22,14 @@ def merge_sandbox_create_body(
     *,
     dockerfile: Optional[str] = None,
     snapshot: Optional[str] = None,
+    target: Optional[str] = None,
 ) -> dict[str, Any]:
     """Fill One/Daytona create fields so a name-only call validates.
 
     One's create-sandbox action requires ``buildInfo.dockerfileContent``.
-    Daytona also accepts ``snapshot`` (e.g. ``ubuntu-4vcpu-8ram-100gb``).
-    Caller keys win. A blank snapshot omits the field.
+    Daytona also accepts ``snapshot`` (e.g. ``ubuntu-4vcpu-8ram-100gb``)
+    and ``target`` (region, e.g. ``us`` / ``eu``).
+    Caller keys win. A blank snapshot or target omits the field.
     """
     body: dict[str, Any] = dict(data or {})
     dockerfile_content = DEFAULT_DAYTONA_DOCKERFILE if dockerfile is None else str(dockerfile)
@@ -44,6 +46,10 @@ def merge_sandbox_create_body(
         snapshot_value = snapshot_value.strip()
         if snapshot_value:
             body["snapshot"] = snapshot_value
+    if "target" not in body:
+        target_value = str(target).strip() if target is not None else ""
+        if target_value:
+            body["target"] = target_value
     return body
 
 
@@ -81,6 +87,7 @@ class OneDaytonaClient:
         timeout: float = 90.0,
         dockerfile: Optional[str] = None,
         snapshot: Optional[str] = None,
+        target: Optional[str] = None,
     ) -> None:
         if not connection_key:
             raise OneError("ONE_DAYTONA_CONNECTION_KEY is required for One sandboxes")
@@ -93,6 +100,7 @@ class OneDaytonaClient:
         self.sandbox_path_var = sandbox_path_var
         self.dockerfile = dockerfile
         self.snapshot = snapshot
+        self.target = target
 
     def _execute(
         self,
@@ -120,6 +128,7 @@ class OneDaytonaClient:
             data,
             dockerfile=self.dockerfile,
             snapshot=self.snapshot,
+            target=self.target,
         )
         payload = self._execute(
             self.create_action_id,
@@ -189,4 +198,5 @@ def one_daytona_from_settings(settings: Any, *, runner: Optional[OneCli] = None)
         timeout=settings.one_timeout_seconds,
         dockerfile=settings.one_daytona_dockerfile,
         snapshot=settings.one_daytona_snapshot,
+        target=getattr(settings, "resolved_daytona_target", None),
     )

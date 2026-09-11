@@ -107,6 +107,19 @@ def test_one_daytona_create_defaults_from_env(monkeypatch: pytest.MonkeyPatch):
     assert settings.one_daytona_snapshot == "daytonaio/sandbox:latest"
 
 
+def test_daytona_target_and_region_from_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DAYTONA_TARGET", "us")
+    settings = Settings(one_cli_auth=False)
+    assert settings.resolved_daytona_target == "us"
+    view = public_settings_view(settings)
+    assert view["daytona_target"] == "us"
+
+    monkeypatch.delenv("DAYTONA_TARGET", raising=False)
+    monkeypatch.setenv("DAYTONA_REGION", "eu")
+    settings = Settings(one_cli_auth=False)
+    assert settings.resolved_daytona_target == "eu"
+
+
 def test_invalid_research_and_sandbox_providers_rejected():
     with pytest.raises(ValidationError):
         Settings(research_provider="bing")

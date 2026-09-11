@@ -3,17 +3,79 @@
 from __future__ import annotations
 
 import logging
+import os
+import socket
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional, Protocol
+from urllib.parse import urlparse
 
 from self_improving_outreach.config import Settings
 
 logger = logging.getLogger("self_improving_outreach.trace")
 
+_DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
+_OTLP_PROBE_TIMEOUT_SECONDS = 0.2
+_OTLP_EXPORT_TIMEOUT_MS = "1000"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _otlp_endpoint() -> str:
+    return (os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") or _DEFAULT_OTLP_ENDPOINT).strip()
+
+
+def _otlp_host_port(endpoint: str) -> Optional[tuple[str, int]]:
+    raw = endpoint.strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+    host = parsed.hostname
+    if not host:
+        return None
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 4318
+    return host, port
+
+
+def _is_loopback_host(host: str) -> bool:
+    return host.lower() in {"localhost", "127.0.0.1", "::1"}
+
+
+def _otlp_loopback_reachable(endpoint: str) -> bool:
+    parsed = _otlp_host_port(endpoint)
+    if parsed is None:
+        return False
+    host, port = parsed
+    if not _is_loopback_host(host):
+        return True
+    try:
+        with socket.create_connection((host, port), timeout=_OTLP_PROBE_TIMEOUT_SECONDS):
+            return True
+    except OSError:
+        return False
+
+
+def _soften_otel_export_timeout() -> None:
+    os.environ.setdefault("OTEL_EXPORTER_OTLP_TIMEOUT", _OTLP_EXPORT_TIMEOUT_MS)
+
+
+def resolve_daytona_otel_enabled(settings: Settings) -> tuple[bool, Optional[str]]:
+    """Return (enabled, degrade_reason). Local spans always stay on LoggingTracer."""
+    if not settings.daytona_otel_enabled:
+        return False, None
+    endpoint = _otlp_endpoint()
+    if not _otlp_loopback_reachable(endpoint):
+        return False, "otlp_endpoint_unreachable"
+    _soften_otel_export_timeout()
+    return True, None
+
+
+def _sandbox_name(run_id: str) -> str:
+    return f"cubiczan-outreach-{run_id[:8]}" if run_id else "cubiczan-outreach"
 
 
 class RunTracer(Protocol):
@@ -70,6 +132,7 @@ class DaytonaTracer(LoggingTracer):
         config = DaytonaConfig(
             api_key=os.environ["DAYTONA_API_KEY"],
             api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
+            target=os.environ.get("DAYTONA_TARGET"),  # or DAYTONA_REGION; e.g. "us"
             otel_enabled=True,  # or DAYTONA_OTEL_ENABLED=true
         )
         daytona = Daytona(config)
@@ -79,6 +142,9 @@ class DaytonaTracer(LoggingTracer):
     ``daytona`` actions when ``SANDBOX_PROVIDER`` resolves to ``one``; otherwise
     it initializes the Daytona SDK when the API key is available. Creating a
     sandbox per crew run is gated by DAYTONA_SANDBOX_RUNS.
+
+    SDK create needs an org default region in the Daytona Dashboard **or**
+    ``DAYTONA_TARGET`` / ``DAYTONA_REGION`` (``DaytonaConfig.target``).
     """
 
     def __init__(self, settings: Settings, run_id: str = "", *, one_client=None) -> None:
@@ -99,7 +165,7 @@ class DaytonaTracer(LoggingTracer):
             self.client = one_client or one_daytona_from_settings(self.settings)
             self.event("daytona.client_ready", {"provider": "one"})
             if self.settings.daytona_sandbox_runs:
-                name = f"cubiczan-outreach-{self.run_id[:8]}" if self.run_id else "cubiczan-outreach"
+                name = _sandbox_name(self.run_id)
                 self.sandbox = self.client.create({"name": name})
                 sandbox_id = getattr(self.sandbox, "id", "")
                 self.event("daytona.sandbox_created", {"provider": "one", "sandbox_id": sandbox_id})
@@ -112,19 +178,44 @@ class DaytonaTracer(LoggingTracer):
         except Exception:
             self.event("daytona.sdk_missing", {})
             return
+        otel_enabled, otel_reason = resolve_daytona_otel_enabled(self.settings)
+        if otel_reason:
+            self.event("daytona.otel_disabled", {"reason": otel_reason})
         try:
-            config = DaytonaConfig(
-                api_key=self.settings.daytona_api_key,
-                api_url=self.settings.daytona_api_url,
-                otel_enabled=self.settings.daytona_otel_enabled,
-            )
+            config_kwargs: dict[str, Any] = {
+                "api_key": self.settings.daytona_api_key,
+                "api_url": self.settings.daytona_api_url,
+                "otel_enabled": otel_enabled,
+            }
+            target = self.settings.resolved_daytona_target
+            if target:
+                config_kwargs["target"] = target
+            config = DaytonaConfig(**config_kwargs)
             self.client = Daytona(config)
-            self.event("daytona.client_ready", {"api_url": self.settings.daytona_api_url, "provider": "daytona"})
+            ready_attrs: dict[str, Any] = {
+                "api_url": self.settings.daytona_api_url,
+                "provider": "daytona",
+            }
+            if target:
+                ready_attrs["target"] = target
+            self.event("daytona.client_ready", ready_attrs)
             if self.settings.daytona_sandbox_runs:
-                self.sandbox = self.client.create()
-                self.event("daytona.sandbox_created", {"provider": "daytona"})
+                self.sandbox = self._sdk_create(name=_sandbox_name(self.run_id), target=target)
+                created_attrs: dict[str, Any] = {"provider": "daytona"}
+                sandbox_id = getattr(self.sandbox, "id", "")
+                if sandbox_id:
+                    created_attrs["sandbox_id"] = sandbox_id
+                if target:
+                    created_attrs["target"] = target
+                self.event("daytona.sandbox_created", created_attrs)
         except Exception as exc:  # noqa: BLE001
-            self.event("daytona.init_failed", {"error": str(exc)})
+            self.event("daytona.init_failed", {"provider": "daytona", "error": str(exc)})
+
+    def _sdk_create(self, *, name: str, target: Optional[str]) -> Any:
+        params = _sdk_create_params(name=name, target=target)
+        if params is not None:
+            return self.client.create(params)
+        return self.client.create()
 
     def close(self) -> None:
         if self.sandbox is not None:
@@ -133,6 +224,30 @@ class DaytonaTracer(LoggingTracer):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("daytona sandbox delete failed: %s", exc)
             self.sandbox = None
+        client = self.client
+        closer = getattr(client, "close", None) if client is not None else None
+        if callable(closer):
+            try:
+                closer()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("daytona client close failed: %s", exc)
+
+
+def _sdk_create_params(*, name: str, target: Optional[str]) -> Any:
+    try:
+        from daytona import CreateSandboxFromSnapshotParams  # type: ignore
+    except Exception:
+        return None
+    kwargs: dict[str, Any] = {"name": name}
+    fields = getattr(CreateSandboxFromSnapshotParams, "model_fields", None)
+    if fields is None:
+        fields = getattr(CreateSandboxFromSnapshotParams, "__annotations__", {})
+    if target and "target" in fields:
+        kwargs["target"] = target
+    try:
+        return CreateSandboxFromSnapshotParams(**kwargs)
+    except Exception:
+        return None
 
 
 def build_tracer(settings: Settings, run_id: str = "") -> LoggingTracer:
