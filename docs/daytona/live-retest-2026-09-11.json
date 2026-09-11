@@ -1,0 +1,33 @@
+{
+  "run_id": "f5f6ab45-25bb-457c-bef6-dd8143049cc7",
+  "records": [
+    {
+      "name": "daytona.client_ready",
+      "phase": "event",
+      "at": "2026-09-11T19:43:00.200495+00:00",
+      "attributes": {
+        "api_url": "https://app.daytona.io/api",
+        "provider": "daytona",
+        "target": "us"
+      }
+    },
+    {
+      "name": "daytona.sandbox_created",
+      "phase": "event",
+      "at": "2026-09-11T19:43:01.401845+00:00",
+      "attributes": {
+        "provider": "daytona",
+        "sandbox_id": "c481c256-742a-47a2-93a2-516750c96a9b",
+        "target": "us"
+      }
+    }
+  ],
+  "summary": {
+    "pass": true,
+    "sandbox_id": "c481c256-742a-47a2-93a2-516750c96a9b",
+    "target": "us",
+    "code_run": "print('cubiczan-daytona-ok') -> exit 0",
+    "sandbox_deleted": true,
+    "otel": false
+  }
+}
