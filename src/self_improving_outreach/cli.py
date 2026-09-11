@@ -11,12 +11,17 @@ from rich.console import Console
 from rich.table import Table
 
 from self_improving_outreach import brand
-from self_improving_outreach.config import get_settings, reset_settings_cache
+from self_improving_outreach.config import get_settings, public_settings_view, reset_settings_cache
 from self_improving_outreach.learning.learner import apply_learn_event
 from self_improving_outreach.models import LearnEvent, Outcome
 from self_improving_outreach.runtime import SAMPLE_QUEUE, build_runtime, build_swarm
-from self_improving_outreach.swarm.queue import lead_from_mapping
-from self_improving_outreach.voice.livekit_agent import describe_status, record_voice_feedback
+from self_improving_outreach.swarm.queue import lead_from_mapping, load_json_leads
+from self_improving_outreach.voice.livekit_agent import (
+    describe_status,
+    record_transcript_feedback,
+    record_voice_feedback,
+)
+from self_improving_outreach.voice.transcript import parse_voice_transcript_file
 
 app = typer.Typer(
     help=f"{brand.BRAND} self-improving outreach crews. Drafts + learns; Pipeline Scout sends.",
@@ -129,37 +134,51 @@ def voice(
     lead_id: Optional[str] = typer.Option(None),
     positive: bool = typer.Option(True, help="Mock interview: thumbs up/down into Learner"),
     notes: str = typer.Option("voice preference interview"),
+    transcript_file: Optional[Path] = typer.Option(
+        None,
+        "--transcript-file",
+        help="JSON interview transcript (positive/negative, notes, pattern_id)",
+    ),
 ) -> None:
     """Optional LiveKit module. Without keys, records mock interview feedback only."""
     settings = get_settings()
     console.print(describe_status(settings))
+    feedback = None
+    if transcript_file is not None:
+        feedback = parse_voice_transcript_file(transcript_file)
+        lead_id = lead_id or feedback.lead_id
+        positive = feedback.positive
+        notes = feedback.notes or notes
     if not lead_id:
         return
     runtime = build_runtime(settings)
-    lead = runtime["store"].get_lead(lead_id)
+    lead = _resolve_voice_lead(runtime["store"], lead_id)
     if lead is None:
         raise typer.BadParameter(f"Unknown lead_id {lead_id}")
-    weights = record_voice_feedback(runtime["store"], lead, positive=positive, notes=notes)
-    console.print({"weights": weights})
+    if feedback is not None:
+        weights = record_transcript_feedback(runtime["store"], lead, feedback)
+    else:
+        weights = record_voice_feedback(runtime["store"], lead, positive=positive, notes=notes)
+    console.print({"weights": weights, "source": "livekit", "positive": positive})
 
 
 @app.command("show-config")
 def show_config() -> None:
     """Print non-secret configuration (never prints key material)."""
     reset_settings_cache()
-    settings = get_settings()
-    console.print(
-        {
-            "brand": brand.BRAND,
-            "mock_mode": settings.is_mock,
-            "you_com_configured": bool(settings.you_key),
-            "clickhouse_configured": bool(settings.clickhouse_host),
-            "daytona_configured": bool(settings.daytona_api_key),
-            "livekit_configured": bool(settings.livekit_api_key),
-            "crewai": settings.use_crewai,
-            "sample_queue": str(SAMPLE_QUEUE),
-        }
-    )
+    console.print(public_settings_view(get_settings()))
+
+
+def _resolve_voice_lead(store, lead_id: str):
+    lead = store.get_lead(lead_id)
+    if lead is not None:
+        return lead
+    if SAMPLE_QUEUE.exists():
+        for queued in load_json_leads(SAMPLE_QUEUE):
+            if queued.lead_id == lead_id:
+                store.upsert_lead(queued)
+                return queued
+    return None
 
 
 def _print_swarm(report) -> None:

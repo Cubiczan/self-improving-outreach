@@ -16,6 +16,13 @@ The system SHALL execute each lead through: research → score → draft → cri
 - WHEN `python -m self_improving_outreach run --lead "..."` is invoked
 - THEN the pipeline completes using mocked research and an in-memory store
 
+#### Scenario: Live CrewAI via Boundless
+
+- GIVEN `MOCK_MODE=false`, `LLM_PROVIDER=boundless`, and `BOUNDLESS_API_KEY`
+- WHEN `swarm --once` runs and the `crew` extra is installed
+- THEN Drafter MAY call CrewAI against the Boundless OpenAI-compatible `base_url`
+- AND if CrewAI or the LLM call fails, the deterministic drafter still completes the unit
+
 #### Scenario: Live web refresh before draft
 
 - GIVEN a You.com API key

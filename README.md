@@ -95,7 +95,7 @@ A tool failure in **one** worker switches that worker to the failover path. Othe
 6. **Learner** — Explicit outcomes (`thumbs_up` / `thumbs_down` / `replied` / `meeting` / `ignore` / `sent`) update weights and pattern win rates. Mock swarm can simulate outcomes so the next batch prefers winning angles.
 7. **Voice (optional)** — LiveKit Agents preference interview writes the same Learner path. Core text crew does not require LiveKit.
 
-CrewAI is used when `crewai` is installed and `OPENAI_API_KEY` is set. Otherwise a deterministic mock crew runs the same stages (CI and laptop demos).
+CrewAI is used when `crewai` is installed and an LLM key is present (`OPENAI_API_KEY`, or Boundless via `LLM_PROVIDER=boundless` / Boundless fallback). Otherwise a deterministic mock crew runs the same stages (CI and laptop demos).
 
 ## Quick start (mock, no API keys)
 
@@ -128,10 +128,13 @@ uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-111
 | Variable | Used for |
 | --- | --- |
 | `YOU_API_KEY` or `YDC_API_KEY` | You.com Search / Contents / Research |
-| `OPENAI_API_KEY`, `CREWAI_MODEL` | Live CrewAI prose |
+| `LLM_PROVIDER` | `openai` (default) or `boundless` |
+| `OPENAI_API_KEY`, `CREWAI_MODEL` | Live CrewAI prose via OpenAI |
+| `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL` | OpenAI-compatible Boundless inference |
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_PORT`, `CLICKHOUSE_SECURE` | ClickHouse Cloud or local |
 | `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona client + OTEL traces |
-| `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Optional voice interview |
+| `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Optional live voice room (not required for transcript ingest) |
+| `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Post-draft Learner hook from a JSON transcript |
 | `MOCK_MODE`, `HUMAN_GATE_ENABLED`, `SIMULATE_OUTCOMES` | Runtime behavior |
 
 Never commit `.env`. The CLI `show-config` prints booleans only — not secret values.
@@ -140,7 +143,7 @@ Never commit `.env`. The CLI `show-config` prints booleans only — not secret v
 
 Repository **Settings → Secrets and variables → Actions**. Use the same names as `.env.example`. CI (`/.github/workflows/ci.yml`) runs `uv run pytest` with `MOCK_MODE=true` and does **not** need secrets. Add keys only if you introduce a non-mock integration job:
 
-`YOU_API_KEY`, `YDC_API_KEY`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `OPENAI_API_KEY`.
+`YOU_API_KEY`, `YDC_API_KEY`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `OPENAI_API_KEY`, `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL`, `LLM_PROVIDER`.
 
 ## Vercel project env
 
@@ -193,14 +196,71 @@ daytona = Daytona(config)
 
 `DAYTONA_SANDBOX_RUNS=true` optionally creates a sandbox per session. MVP tracing does not require that. Without the SDK/key, spans still land on `agent_runs.traces`.
 
-## LiveKit
+## Boundless (burn credits on `swarm --once`)
+
+Sam's credit is on **boundless.network**. This repo defaults `BOUNDLESS_BASE_URL` to BoundlessAPI (`https://api.boundlessapi.com/v1`). If the dashboard that issued the key shows a different OpenAI-compatible URL, override it.
+
+| Credit source | `BOUNDLESS_BASE_URL` | Typical `BOUNDLESS_MODEL` |
+| --- | --- | --- |
+| BoundlessAPI catalog (default) | `https://api.boundlessapi.com/v1` | `gpt-4o-mini` (or a live catalog id such as `gpt-5.4-mini`) |
+| boundless.network inference | `https://api.inference.boundless.network/v1` | `glm-5.2` |
+
+```bash
+# .env — never commit this file
+MOCK_MODE=false
+LLM_PROVIDER=boundless
+BOUNDLESS_API_KEY=          # paste locally only
+BOUNDLESS_BASE_URL=https://api.boundlessapi.com/v1
+# If Sam's dashboard is boundless.network inference instead:
+# BOUNDLESS_BASE_URL=https://api.inference.boundless.network/v1
+# BOUNDLESS_MODEL=glm-5.2
+BOUNDLESS_MODEL=gpt-4o-mini
+# YOU_API_KEY=              # optional; without it, research stays mocked
+```
+
+```bash
+uv sync --extra crew
+uv run python -m self_improving_outreach show-config   # booleans only; no secrets
+uv run python -m self_improving_outreach swarm --once --concurrency 2
+```
+
+`LLM_PROVIDER=boundless` points CrewAI / LiteLLM at Boundless (`base_url` + key, also copied to `OPENAI_API_KEY` / `OPENAI_BASE_URL`). If `LLM_PROVIDER=openai` but only `BOUNDLESS_API_KEY` is set, Boundless is the fallback. Each live crew runs several LLM tasks — this **does** spend Boundless credit. Keep `MOCK_MODE=true` (the default) for CI and laptop demos.
+
+## LiveKit learner loop
+
+Marketing Hunter or an AE runs a **preference interview** (LiveKit room, or a saved JSON transcript). That interview feeds the **Learner** (`thumbs_up` / `thumbs_down`, notes, optional `pattern_id`). **Pipeline Scout / Marketing Hunter still own LinkedIn send** — this repo never posts.
+
+```bash
+# Mock thumbs (no LiveKit keys required)
+uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111-111111111111 --positive
+uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111-111111111111 --no-positive
+
+# Parse a saved interview transcript
+uv run python -m self_improving_outreach voice \
+  --lead-id 11111111-1111-1111-1111-111111111111 \
+  --transcript-file data/voice_transcript.sample.json
+```
+
+Transcript JSON (any of `positive`, `sentiment`, `outcome`, `thumbs` for polarity):
+
+```json
+{
+  "lead_id": "11111111-1111-1111-1111-111111111111",
+  "positive": true,
+  "pattern_id": "mw-90d",
+  "notes": "CFO preferred the 90-day material-weakness angle",
+  "transcript": "optional interview text"
+}
+```
+
+After a successful pipeline draft, set `LIVEKIT_FEEDBACK_AUTO=true` and `LIVEKIT_TRANSCRIPT_PATH` to a file or a directory of `{lead_id}.json` files. The hook calls `record_voice_feedback` and writes an `outreach_event` with `metadata.source=livekit`.
 
 ```bash
 uv sync --extra livekit
 uv run python -m self_improving_outreach voice --lead-id <uuid>
 ```
 
-Without keys the command reports idle status. `record_voice_feedback` is the Learner hook a live `AgentSession` should call after a preference interview.
+Without LiveKit keys the command stays idle for rooms and still records mock / file feedback. A live `AgentSession` should call `record_voice_feedback` after the interview.
 
 ## How outcomes feed learning
 
@@ -210,16 +270,17 @@ Without keys the command reports idle status. `record_voice_feedback` is the Lea
 | `ignore`, `thumbs_down` | Lower those weights and the pattern score |
 | `sent` | Small positive (Pipeline Scout actually sent) |
 | You.com exception | `tool_failures` row; second failure degrades to cache; swarm continues |
-| Voice thumbs | Same as explicit thumbs via Learner |
+| Voice thumbs / transcript | Same as explicit thumbs via Learner; `outreach_events.metadata.source=livekit` |
 
 Drafter always reads **current** `message_patterns` ordered by score, so the next swarm batch prefers angles that worked.
 
 ## Layout
 
 ```
-src/self_improving_outreach/   # CLI, crews, swarm, stores, tools, voice
+src/self_improving_outreach/   # CLI, crews, swarm, stores, tools, voice, llm provider
 migrations/clickhouse/         # DDL
 data/leads.sample.json         # 3 mock ICP leads
+data/voice_transcript.sample.json
 openspec/specs/                # living behavior specs
 ```
 

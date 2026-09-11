@@ -11,6 +11,7 @@ from typing import Any, Optional
 from self_improving_outreach.brand import SYSTEM_CONTEXT
 from self_improving_outreach.config import Settings
 from self_improving_outreach.crews.pipeline import draft_message
+from self_improving_outreach.llm import apply_llm_runtime_env, build_crewai_llm
 from self_improving_outreach.models import Channel, Draft, Lead, ResearchBundle, ScoreResult
 from self_improving_outreach.stores.base import OutreachStore
 
@@ -57,35 +58,40 @@ def run_crewai_draft(
         return None
     from crewai import Agent, Crew, Process, Task
 
+    apply_llm_runtime_env(settings)
+    llm = build_crewai_llm(settings)
+    agent_kwargs: dict[str, Any] = {
+        "verbose": settings.crewai_verbose,
+        "allow_delegation": False,
+    }
+    if llm is not None:
+        agent_kwargs["llm"] = llm
+
     patterns = store.list_patterns()
     pattern_blob = "\n".join(f"- {p.pattern_id} ({p.score:.2f}): {p.angle}" for p in patterns[:5])
     researcher = Agent(
         role="Cubiczan Researcher",
         goal="Gather live CFO/CIO and company context for governed finance outreach",
         backstory=SYSTEM_CONTEXT + " You use You.com and never invent filings.",
-        verbose=settings.crewai_verbose,
-        allow_delegation=False,
+        **agent_kwargs,
     )
     scorer = Agent(
         role="Cubiczan Scorer",
         goal="Explain the deterministic ICP score using stored ClickHouse weights",
         backstory="You do not invent weights. You interpret the numeric score already computed.",
-        verbose=settings.crewai_verbose,
-        allow_delegation=False,
+        **agent_kwargs,
     )
     drafter = Agent(
         role="Cubiczan Drafter",
         goal="Write a short LinkedIn or email follow-up using winning Cubiczan patterns",
         backstory=SYSTEM_CONTEXT,
-        verbose=settings.crewai_verbose,
-        allow_delegation=False,
+        **agent_kwargs,
     )
     critic = Agent(
         role="Cubiczan Critic",
         goal="Reject brand misspellings, overclaims, and send-ready language that implies we posted to LinkedIn",
         backstory="Pipeline Scout owns send. You only polish the draft.",
-        verbose=settings.crewai_verbose,
-        allow_delegation=False,
+        **agent_kwargs,
     )
     research_task = Task(
         description=(
