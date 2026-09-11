@@ -1,6 +1,8 @@
 # Self Improving Outreach
 
-Research a lead, score it with stored ICP weights, draft outreach, then **learn** from what happened so the next draft is better.
+A closed-loop system for **any outbound sales / outreach** — not a finance-only or CFO/CIO product. Research a lead, score it against *your* ICP weights, draft a message, then **learn** from what happened so the next draft is better.
+
+The repo ships **example** ICP features and message angles from one Cubiczan-style finance demo. Swap the weights and patterns for any market.
 
 **CrewAI is the live draft brain inside each swarm worker — not the whole system.** Scoring, pattern selection, brand critique, failover, and learning are deterministic Python. CrewAI only writes prose when live LLM keys are on.
 
@@ -20,7 +22,7 @@ lead queue  →  swarm worker  →  research → score → draft → critic → 
 Every lead — mock or live — goes through the same closed loop:
 
 1. **Research** — You.com Search / Research, with failover to cached ClickHouse context. Prefers One `you` when `ONE_SECRET` (or One CLI auth) and `ONE_YOU_CONNECTION_KEY` are set (`RESEARCH_PROVIDER=auto|one`). Otherwise HTTP with `YOU_API_KEY` / `YDC_API_KEY`. Retry once, then degrade and log `tool_failures`.
-2. **Score** — Deterministic ICP math from ClickHouse `icp_weights` (**not** CrewAI). Features such as `material_weakness_or_sox`, `cfo_cio_title`, and `finance_ops_pain` are multiplied by stored weights.
+2. **Score** — Deterministic ICP math from ClickHouse `icp_weights` (**not** CrewAI). Whatever features you store are multiplied by those weights. The demo set includes examples such as `material_weakness_or_sox`, `cfo_cio_title`, and `finance_ops_pain`.
 3. **Draft** — If live LLM keys are on (`MOCK_MODE=false` plus OpenAI or Boundless), CrewAI runs a **sequential** crew: Researcher → Scorer → Drafter → Critic. The critic’s body becomes the outreach draft. If CrewAI is off or the LLM call fails, Drafter fills the highest-scoring `message_patterns` template.
 4. **Critic (code)** — Second pass for **Cubiczan** brand spelling (never CubicZan) and overclaims (`guarantee`, length). Revises the body in place.
 5. **Gate + log + learn** — Human-gate stub, `outreach_event` in ClickHouse (or the in-memory store). Live production waits for Scout `learn` events unless `LEARN_ON_DRAFT=true`. Mock + `SIMULATE_OUTCOMES=true` still updates the Learner after each draft so a demo batch visibly shifts weights.
@@ -37,8 +39,8 @@ The Learner is the point of the system. Later batches read the weights and patte
 
 | Store | What changes |
 | --- | --- |
-| **`icp_weights`** | Features such as `material_weakness_or_sox`, `cfo_cio_title`, `finance_ops_pain` (also `multi_entity_or_treasury`, `enterprise_or_midmarket`, `agentic_readiness`, `industry_fit`). After each outcome, Learner nudges the matching features by **± learning rate 0.12**, clamped **0.15–2.5**. Meetings reward more than a reply; thumbs-down penalizes more than ignore. |
-| **`message_patterns`** | Angles such as `mw-90d`, `close-governed`, `treasury-obs` (`recon-auto`, `cfo-cio-copilot` too). Wins / losses / impressions update a Bayesian score `(wins + 1) / (impressions + 2)`. Drafter always picks the **highest-scoring** pattern for the channel. |
+| **`icp_weights`** | Any feature keys you persist. After each outcome, Learner nudges the matching features by **± learning rate 0.12**, clamped **0.15–2.5**. Meetings reward more than a reply; thumbs-down penalizes more than ignore. **Examples** in this repo: `material_weakness_or_sox`, `cfo_cio_title`, `finance_ops_pain` (also `multi_entity_or_treasury`, `enterprise_or_midmarket`, `agentic_readiness`, `industry_fit`). |
+| **`message_patterns`** | Any outreach angles you persist. Wins / losses / impressions update a Bayesian score `(wins + 1) / (impressions + 2)`. Drafter always picks the **highest-scoring** pattern for the channel. **Examples** in this repo: `mw-90d`, `close-governed`, `treasury-obs` (`recon-auto`, `cfo-cio-copilot` too). |
 
 If ClickHouse is unset, an in-memory store keeps the same semantics so mock mode still learns.
 
@@ -50,7 +52,7 @@ If ClickHouse is unset, an in-memory store keeps the same semantics so mock mode
 - Pipeline Scout outcomes (after a real send, out of band)
 - optional LiveKit preference interviews (`metadata.source=livekit`)
 
-`SIMULATE_OUTCOMES=true` in mock mode invents an outcome from the score + angle so a demo swarm **visibly shifts weights** across batches. Material-weakness and treasury angles win more often in that simulator. On the live path, set `LEARN_ON_DRAFT=true` only for demos; production should wait for real Scout outcomes.
+`SIMULATE_OUTCOMES=true` in mock mode invents an outcome from the score + angle so a demo swarm **visibly shifts weights** across batches. In the shipped example data, material-weakness and treasury angles win more often in that simulator. On the live path, set `LEARN_ON_DRAFT=true` only for demos; production should wait for real Scout outcomes.
 
 ```bash
 uv run python -m self_improving_outreach learn --event \
@@ -180,6 +182,7 @@ cp .env.example .env          # MOCK_MODE=true is the default
 uv sync --group dev
 uv run pytest
 uv run python -m self_improving_outreach show-config
+# Example lead from the shipped demo ICP (any company / title / pain works)
 uv run python -m self_improving_outreach run --lead '{"company":"Northline Manufacturing","title":"CFO","contact_name":"Priya Shah","industry":"manufacturing","signals":{"pain":"material weakness"}}'
 uv run python -m self_improving_outreach swarm --once --concurrency 3
 ```
@@ -329,7 +332,7 @@ After a draft, `LIVEKIT_FEEDBACK_AUTO=true` plus `LIVEKIT_TRANSCRIPT_PATH` (file
 ```
 src/self_improving_outreach/   # CLI, crews, swarm, stores, tools, voice, llm provider
 migrations/clickhouse/         # DDL
-data/leads.sample.json         # 3 mock ICP leads
+data/leads.sample.json         # 3 example leads (demo ICP)
 data/voice_transcript.sample.json
 data/clickup_task.sample.json  # ClickUp webhook → queued lead
 openspec/specs/                # living behavior specs
