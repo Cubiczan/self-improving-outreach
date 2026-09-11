@@ -146,6 +146,8 @@ def test_public_settings_view_and_show_config_hide_secrets():
         one_you_connection_key="live::you::default::secret-conn",
         one_daytona_connection_key="live::daytona::default::secret-conn",
         one_cli_auth=False,
+        simulate_outcomes=True,
+        learn_on_draft=False,
     )
     view = public_settings_view(settings)
     dumped = str(view)
@@ -161,6 +163,9 @@ def test_public_settings_view_and_show_config_hide_secrets():
     assert view["openai_configured"] is True
     assert view["llm_provider"] == "boundless"
     assert view["livekit_feedback_auto"] is False
+    assert view["learn_on_draft"] is False
+    assert view["should_learn_on_draft"] is True
+    assert view["simulate_outcomes"] is True
 
     runner = CliRunner()
     result = runner.invoke(app, ["show-config"])

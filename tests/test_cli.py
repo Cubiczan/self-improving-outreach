@@ -14,6 +14,7 @@ def test_cli_show_config_is_mock():
     assert "llm_provider" in result.stdout
     assert "boundless_configured" in result.stdout
     assert "livekit_feedback_auto" in result.stdout
+    assert "learn_on_draft" in result.stdout
     assert "research_provider" in result.stdout
     assert "sandbox_provider" in result.stdout
     assert "one_configured" in result.stdout

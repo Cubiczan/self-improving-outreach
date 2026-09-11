@@ -145,7 +145,7 @@ class OutreachPipeline:
 
                 learned = False
                 resolved_outcome = outcome
-                if resolved_outcome is None and self.settings.simulate_outcomes and self.settings.is_mock:
+                if resolved_outcome is None and self.settings.should_learn_on_draft:
                     resolved_outcome = simulate_outcome(score.total, draft.angle)
                 if resolved_outcome is not None and resolved_outcome != Outcome.DRAFTED:
                     learn_event = LearnEvent(
@@ -167,7 +167,10 @@ class OutreachPipeline:
                             angle=draft.angle,
                             pattern_id=draft.pattern_id,
                             body=draft.body,
-                            metadata={"simulated": outcome is None},
+                            metadata={
+                                "simulated": outcome is None,
+                                "learn_on_draft": self.settings.learn_on_draft,
+                            },
                         )
                     )
                     learned = True

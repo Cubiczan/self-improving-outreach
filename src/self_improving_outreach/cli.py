@@ -12,10 +12,18 @@ from rich.table import Table
 
 from self_improving_outreach import brand
 from self_improving_outreach.config import get_settings, public_settings_view, reset_settings_cache
+from self_improving_outreach.integrations.clickup import ingest_clickup_payload
 from self_improving_outreach.learning.learner import apply_learn_event
-from self_improving_outreach.models import LearnEvent, Outcome
-from self_improving_outreach.runtime import SAMPLE_QUEUE, build_runtime, build_swarm
-from self_improving_outreach.swarm.queue import lead_from_mapping, load_json_leads
+from self_improving_outreach.models import LeadStatus, LearnEvent, Outcome
+from self_improving_outreach.runtime import build_runtime, build_swarm
+from self_improving_outreach.swarm.queue import (
+    JsonLeadQueue,
+    lead_from_mapping,
+    mappings_from_json_payload,
+    requeue_leads,
+    resolve_lead_from_sample,
+    upsert_leads_from_mappings,
+)
 from self_improving_outreach.voice.livekit_agent import (
     describe_status,
     record_transcript_feedback,
@@ -27,6 +35,11 @@ app = typer.Typer(
     help=f"{brand.BRAND} self-improving outreach crews. Drafts + learns; Pipeline Scout sends.",
     no_args_is_help=True,
 )
+queue_app = typer.Typer(
+    help="Reclaim or upsert leads on the ClickHouse / JSON queue (search + outreach only).",
+    no_args_is_help=True,
+)
+app.add_typer(queue_app, name="queue")
 console = Console()
 
 
@@ -62,16 +75,25 @@ def learn(
     event: Optional[str] = typer.Option(None, help="JSON LearnEvent"),
     event_file: Optional[Path] = typer.Option(None),
 ) -> None:
-    """Apply an explicit outcome (thumbs, reply, meeting, ignore) to weights + patterns."""
+    """Apply a Scout outcome: thumbs_up/down, replied, meeting, ignore, sent."""
     if not event and not event_file:
         raise typer.BadParameter("Provide --event JSON or --event-file")
     payload = json.loads(event_file.read_text(encoding="utf-8") if event_file else event)
     learn_event = LearnEvent.model_validate(payload)
     runtime = build_runtime()
     store = runtime["store"]
-    lead = store.get_lead(learn_event.lead_id)
+    lead = resolve_lead_from_sample(store, learn_event.lead_id)
+    if lead is None and not learn_event.features and not learn_event.pattern_id:
+        raise typer.BadParameter(f"Unknown lead_id {learn_event.lead_id}")
     weights = apply_learn_event(store, learn_event, lead)
-    console.print({"weights": weights, "top_patterns": [p.pattern_id for p in store.list_patterns()[:5]]})
+    console.print(
+        {
+            "weights": weights,
+            "top_patterns": [p.pattern_id for p in store.list_patterns()[:5]],
+            "lead_id": lead.lead_id if lead else learn_event.lead_id,
+            "outcome": learn_event.outcome.value,
+        }
+    )
 
 
 @app.command()
@@ -169,16 +191,135 @@ def show_config() -> None:
     console.print(public_settings_view(get_settings()))
 
 
+@app.command()
+def requeue(
+    lead_id: Optional[list[str]] = typer.Option(
+        None,
+        "--lead-id",
+        help="Lead id to set back to queued (repeatable)",
+    ),
+    company: Optional[str] = typer.Option(None, help="Company substring (case-insensitive)"),
+    all_sample: bool = typer.Option(False, "--all-sample", help="Reset data/leads.sample.json ICP leads"),
+    clear_processing: bool = typer.Option(
+        False,
+        "--clear-processing",
+        help="Set stuck processing leads back to queued",
+    ),
+    queue: Optional[Path] = typer.Option(None, help="Persistable JSON queue (never overwrites the sample file)"),
+) -> None:
+    """Set leads back to queued so the swarm can claim them again."""
+    _run_requeue(lead_id, company, all_sample, clear_processing, queue)
+
+
+@queue_app.command("reset")
+def queue_reset(
+    lead_id: Optional[list[str]] = typer.Option(None, "--lead-id"),
+    company: Optional[str] = typer.Option(None),
+    all_sample: bool = typer.Option(False, "--all-sample"),
+    clear_processing: bool = typer.Option(False, "--clear-processing"),
+    queue: Optional[Path] = typer.Option(None),
+) -> None:
+    """Alias for requeue."""
+    _run_requeue(lead_id, company, all_sample, clear_processing, queue)
+
+
+@queue_app.command("upsert")
+def queue_upsert(
+    from_json: Optional[str] = typer.Option(None, "--from-json", help="Lead JSON object, list, or {leads: [...]}"),
+    from_file: Optional[Path] = typer.Option(None, "--from-file", help="Path to the same JSON shapes"),
+    queue: Optional[Path] = typer.Option(None, help="Persistable JSON queue"),
+) -> None:
+    """Upsert native lead JSON into the queue as queued (search + outreach; no ads)."""
+    if not from_json and not from_file:
+        raise typer.BadParameter("Provide --from-json or --from-file")
+    payload = json.loads(from_file.read_text(encoding="utf-8") if from_file else from_json)
+    store, json_queue = _store_with_optional_queue(queue)
+    leads = upsert_leads_from_mappings(store, mappings_from_json_payload(payload), status=LeadStatus.QUEUED)
+    _persist_queue(json_queue)
+    console.print({"upserted": len(leads), "lead_ids": [lead.lead_id for lead in leads], "status": "queued"})
+
+
+@app.command("ingest-clickup")
+def ingest_clickup(
+    json_payload: Optional[str] = typer.Option(None, "--json", help="ClickUp task or webhook JSON"),
+    file: Optional[Path] = typer.Option(None, "--file", help="Path to ClickUp task / webhook JSON"),
+    force: bool = typer.Option(False, "--force", help="Ingest even when status is not Queued"),
+    queue: Optional[Path] = typer.Option(None, help="Persistable JSON queue"),
+) -> None:
+    """Ingest a ClickUp Queued task into the swarm queue. No paid ad spend paths."""
+    if not json_payload and not file:
+        raise typer.BadParameter("Provide --json or --file")
+    payload = json.loads(file.read_text(encoding="utf-8") if file else json_payload)
+    if not isinstance(payload, dict):
+        raise typer.BadParameter("ClickUp payload must be a JSON object")
+    store, json_queue = _store_with_optional_queue(queue)
+    try:
+        result = ingest_clickup_payload(store, payload, force=force)
+    except (TypeError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _persist_queue(json_queue)
+    if result.skipped:
+        console.print({"skipped": True, "reason": result.reason, "clickup_task_id": result.clickup_task_id})
+        raise typer.Exit(0)
+    lead = result.lead
+    console.print(
+        {
+            "ingested": True,
+            "lead_id": lead.lead_id if lead else None,
+            "company": lead.company if lead else None,
+            "status": lead.status.value if lead else None,
+            "clickup_task_id": result.clickup_task_id,
+        }
+    )
+
+
+def _store_with_optional_queue(queue: Optional[Path]):
+    runtime = build_runtime()
+    store = runtime["store"]
+    json_queue = JsonLeadQueue(store, queue) if queue else None
+    return store, json_queue
+
+
+def _persist_queue(json_queue: Optional[JsonLeadQueue]) -> None:
+    if json_queue is not None:
+        json_queue.persist()
+
+
+def _print_requeue(leads) -> None:
+    table = Table(title=f"{brand.BRAND} requeue → {LeadStatus.QUEUED.value}")
+    table.add_column("lead_id")
+    table.add_column("company")
+    table.add_column("status")
+    for lead in leads:
+        table.add_row(lead.lead_id, lead.company, lead.status.value)
+    console.print(table)
+    console.print({"requeued": len(leads), "lead_ids": [lead.lead_id for lead in leads]})
+
+
+def _run_requeue(
+    lead_id: Optional[list[str]],
+    company: Optional[str],
+    all_sample: bool,
+    clear_processing: bool,
+    queue: Optional[Path],
+) -> None:
+    store, json_queue = _store_with_optional_queue(queue)
+    try:
+        leads = requeue_leads(
+            store,
+            lead_ids=lead_id or None,
+            company=company,
+            all_sample=all_sample,
+            clear_processing=clear_processing,
+        )
+    except (ValueError, KeyError, FileNotFoundError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _persist_queue(json_queue)
+    _print_requeue(leads)
+
+
 def _resolve_voice_lead(store, lead_id: str):
-    lead = store.get_lead(lead_id)
-    if lead is not None:
-        return lead
-    if SAMPLE_QUEUE.exists():
-        for queued in load_json_leads(SAMPLE_QUEUE):
-            if queued.lead_id == lead_id:
-                store.upsert_lead(queued)
-                return queued
-    return None
+    return resolve_lead_from_sample(store, lead_id)
 
 
 def _print_swarm(report) -> None:
