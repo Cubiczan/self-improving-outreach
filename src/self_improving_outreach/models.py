@@ -23,6 +23,10 @@ class LeadStatus(str, Enum):
     PROCESSING = "processing"
     DRAFTED = "drafted"
     PENDING_REVIEW = "pending_review"
+    EXPLORING = "exploring"
+    ADVISORY = "advisory"
+    PROVISIONAL = "provisional"
+    LOCKED = "locked"
     APPROVED_FOR_SCOUT = "approved_for_scout"
     FAILED = "failed"
     LEARNED = "learned"
@@ -101,6 +105,7 @@ class Draft(BaseModel):
     subject: str = ""
     body: str
     critic_notes: list[str] = Field(default_factory=list)
+    adversary_notes: list[str] = Field(default_factory=list)
 
 
 class Critique(BaseModel):
@@ -178,6 +183,7 @@ class PipelineResult(BaseModel):
     draft: Optional[Draft] = None
     critique: Optional[Critique] = None
     gate: Optional[GateDecision] = None
+    chp: Optional[Any] = None
     event: Optional[OutreachEvent] = None
     learned: bool = False
     error: Optional[str] = None

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Persist leads, events, patterns, weights, tool failures, and agent runs in ClickHouse when configured. Fall back to the in-memory store without changing MemoryStore semantics.
+Persist leads, events, patterns, weights, tool failures, agent runs, and CHP decisions in ClickHouse when configured. Fall back to the in-memory store without changing MemoryStore semantics.
 
 ## Requirements
 
@@ -27,3 +27,14 @@ Persist leads, events, patterns, weights, tool failures, and agent runs in Click
 - WHEN migrate runs
 - THEN the database is created
 - AND `001_init.sql` table statements are applied
+- AND `002_chp_lock.sql` (`chp_decisions`) is applied when migrate is pointed at the migrations directory
+
+### Requirement: CHP decisions table
+
+When ClickHouse is configured, the store SHALL persist CHP sessions in `chp_decisions` (decision id, lead id, run id, phase, digests, actor, JSON payload). MemoryStore SHALL keep the same save/get semantics in process. A jsonl file (`CHP_DECISIONS_PATH`) SHALL allow a later CLI process to lock a mock run.
+
+#### Scenario: Memory save and get
+
+- GIVEN a sealed provisional decision
+- WHEN the store saves it
+- THEN `get_chp_decision(lead_id)` returns the same phase and R0 digest

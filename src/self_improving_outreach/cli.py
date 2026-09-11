@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.table import Table
 
 from self_improving_outreach import brand
+from self_improving_outreach.chp.exceptions import ChpError
+from self_improving_outreach.chp.session import apply_lock_and_promote, load_chp_decision
 from self_improving_outreach.config import get_settings, public_settings_view, reset_settings_cache
 from self_improving_outreach.integrations.clickup import ingest_clickup_payload, sync_clickup_list
 from self_improving_outreach.learning.learner import apply_learn_event
@@ -41,6 +43,11 @@ queue_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(queue_app, name="queue")
+chp_app = typer.Typer(
+    help="CHP decision lock: named approve/deny and evidence pack. Does not send.",
+    no_args_is_help=True,
+)
+app.add_typer(chp_app, name="chp")
 console = Console()
 
 
@@ -155,8 +162,8 @@ def swarm(
 @app.command()
 def migrate(
     sql_path: Path = typer.Option(
-        Path("migrations/clickhouse/001_init.sql"),
-        help="ClickHouse DDL file",
+        Path("migrations/clickhouse"),
+        help="ClickHouse DDL file or directory of *.sql (001_init + 002_chp_lock)",
     ),
 ) -> None:
     """Apply ClickHouse schema. Creates the database if it is missing."""
@@ -201,6 +208,56 @@ def voice(
     else:
         weights = record_voice_feedback(runtime["store"], lead, positive=positive, notes=notes)
     console.print({"weights": weights, "source": "livekit", "positive": positive})
+
+
+@chp_app.command("show")
+def chp_show(
+    lead_id: str = typer.Option(..., "--lead-id", help="Lead id of the CHP session"),
+) -> None:
+    """Print the CHP decision (phase, R0 digest, pack). Never sends."""
+    settings = get_settings()
+    runtime = build_runtime(settings)
+    decision = load_chp_decision(settings, runtime["store"], lead_id)
+    if decision is None:
+        raise typer.BadParameter(f"No CHP decision for lead_id {lead_id}")
+    _dump(decision)
+
+
+@chp_app.command("lock")
+def chp_lock(
+    lead_id: str = typer.Option(..., "--lead-id"),
+    actor: str = typer.Option(..., "--actor", help="Named human (not system/auto/anonymous)"),
+    approve: bool = typer.Option(False, "--approve", help="Named approve → locked → approved_for_scout"),
+    deny: bool = typer.Option(False, "--deny", help="Named deny; stays provisional"),
+    notes: str = typer.Option("", "--notes"),
+) -> None:
+    """Named human lock. Approve seals the evidence pack. Does not send LinkedIn or email."""
+    if approve == deny:
+        raise typer.BadParameter("Choose exactly one of --approve or --deny")
+    settings = get_settings()
+    runtime = build_runtime(settings)
+    try:
+        decision, status = apply_lock_and_promote(
+            settings,
+            runtime["store"],
+            lead_id,
+            actor=actor,
+            approve=approve,
+            notes=notes,
+        )
+    except ChpError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(
+        {
+            "lead_id": lead_id,
+            "phase": decision.phase.value,
+            "status": status.value,
+            "actor": actor,
+            "pack": decision.evidence_pack.pack_digest if decision.evidence_pack else None,
+            "send": False,
+        }
+    )
+    _dump(decision)
 
 
 @app.command("show-config")

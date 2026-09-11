@@ -166,6 +166,7 @@ def test_public_settings_view_and_show_config_hide_secrets():
     assert view["learn_on_draft"] is False
     assert view["should_learn_on_draft"] is True
     assert view["simulate_outcomes"] is True
+    assert view["chp_lock_enabled"] is False
 
     runner = CliRunner()
     result = runner.invoke(app, ["show-config"])

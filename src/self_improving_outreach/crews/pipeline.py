@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from self_improving_outreach import brand
+from self_improving_outreach.chp.session import apply_chp_pipeline_gate
 from self_improving_outreach.config import Settings
 from self_improving_outreach.human_gate import apply_human_gate
 from self_improving_outreach.learning.learner import apply_learn_event, simulate_outcome
@@ -124,8 +125,21 @@ class OutreachPipeline:
                     if critique.revised_body:
                         draft.body = critique.revised_body
                         draft.critic_notes = critique.issues
+                chp_decision = None
                 with tracer.span("human_gate"):
-                    gate = apply_human_gate(lead, draft, self.settings)
+                    if self.settings.resolved_chp_lock_enabled:
+                        gate, chp_decision = apply_chp_pipeline_gate(
+                            lead,
+                            draft,
+                            self.settings,
+                            research=research,
+                            score=score,
+                            run_id=run.run_id,
+                            critique=critique,
+                            store=self.store,
+                        )
+                    else:
+                        gate = apply_human_gate(lead, draft, self.settings)
                 event = OutreachEvent(
                     lead_id=lead.lead_id,
                     run_id=run.run_id,
@@ -138,6 +152,8 @@ class OutreachPipeline:
                         "score": score.total,
                         "degraded": research.degraded,
                         "gate": gate.status.value,
+                        "chp_phase": chp_decision.phase.value if chp_decision else None,
+                        "chp_r0": chp_decision.r0.digest if chp_decision and chp_decision.r0 else None,
                     },
                 )
                 self.store.log_event(event)
@@ -203,6 +219,7 @@ class OutreachPipeline:
                 draft=draft,
                 critique=critique,
                 gate=gate,
+                chp=chp_decision,
                 event=event,
                 learned=learned,
             )

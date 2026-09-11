@@ -37,6 +37,8 @@ def _mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLICKUP_API_TOKEN", raising=False)
     monkeypatch.delenv("CLICKUP_LIST_ID", raising=False)
     monkeypatch.delenv("CLICKUP_QUEUE_STATUS", raising=False)
+    monkeypatch.delenv("CHP_LOCK_ENABLED", raising=False)
+    monkeypatch.delenv("CHP_DECISIONS_PATH", raising=False)
     reset_settings_cache()
     yield
     reset_settings_cache()
