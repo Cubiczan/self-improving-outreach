@@ -6,6 +6,7 @@ from copy import deepcopy
 from threading import RLock
 from typing import Optional
 
+from self_improving_outreach.chp.models import ChpDecision
 from self_improving_outreach.learning.defaults import default_patterns, default_weights
 from self_improving_outreach.models import (
     AgentRun,
@@ -31,6 +32,7 @@ class MemoryStore:
         self.weight_version = 1
         self.failures: list[ToolFailure] = []
         self.runs: dict[str, AgentRun] = {}
+        self.chp_decisions: dict[str, ChpDecision] = {}
 
     def upsert_lead(self, lead: Lead) -> Lead:
         with self._lock:
@@ -133,3 +135,12 @@ class MemoryStore:
         with self._lock:
             run = self.runs.get(run_id)
             return run.model_copy(deep=True) if run else None
+
+    def save_chp_decision(self, decision: ChpDecision) -> None:
+        with self._lock:
+            self.chp_decisions[decision.lead_id] = decision.model_copy(deep=True)
+
+    def get_chp_decision(self, lead_id: str) -> Optional[ChpDecision]:
+        with self._lock:
+            decision = self.chp_decisions.get(lead_id)
+            return decision.model_copy(deep=True) if decision else None

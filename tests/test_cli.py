@@ -19,6 +19,7 @@ def test_cli_show_config_is_mock():
     assert "research_provider" in result.stdout
     assert "sandbox_provider" in result.stdout
     assert "one_configured" in result.stdout
+    assert "chp_lock_enabled" in result.stdout
 
 
 def test_cli_run_one_lead():

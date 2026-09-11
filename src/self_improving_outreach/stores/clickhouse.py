@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from self_improving_outreach.chp.models import ChpDecision
 from self_improving_outreach.config import Settings
 from self_improving_outreach.learning.defaults import default_patterns, default_weights
 from self_improving_outreach.models import (
@@ -110,17 +111,26 @@ def apply_clickhouse_migration(
 ) -> int:
     """CREATE DATABASE IF NOT EXISTS, then apply table DDL. Returns statement count.
 
-    Connects without selecting the app database so a missing ``outreach`` DB
-    does not fail the handshake.
+    ``sql_path`` may be a single ``.sql`` file or a directory of ``*.sql``
+    files applied in sort order. Connects without selecting the app database
+    so a missing ``outreach`` DB does not fail the handshake.
     """
     connect_fn = connect or connect_clickhouse
     client = connect_fn(settings, database="")
     db = quote_identifier(settings.clickhouse_database)
     client.command(f"CREATE DATABASE IF NOT EXISTS {db}")
-    statements = parse_sql_statements(sql_path.read_text(encoding="utf-8"))
-    for statement in statements:
-        client.command(statement)
-    return len(statements)
+    files = (
+        sorted(p for p in sql_path.glob("*.sql") if p.is_file())
+        if sql_path.is_dir()
+        else [sql_path]
+    )
+    applied = 0
+    for path in files:
+        statements = parse_sql_statements(path.read_text(encoding="utf-8"))
+        for statement in statements:
+            client.command(statement)
+        applied += len(statements)
+    return applied
 
 
 class ClickHouseStore:
@@ -546,6 +556,54 @@ class ClickHouseStore:
             started_at=_parse_dt(mapping["started_at"]),
             finished_at=_parse_dt(finished) if finished else None,
         )
+
+    def save_chp_decision(self, decision: ChpDecision) -> None:
+        self._ensure_seed()
+        now = utcnow()
+        lock = decision.lock
+        self._client.insert(
+            "chp_decisions",
+            [
+                (
+                    decision.decision_id,
+                    decision.lead_id,
+                    decision.run_id,
+                    decision.phase.value,
+                    decision.r0.digest if decision.r0 else "",
+                    decision.evidence_pack.pack_digest if decision.evidence_pack else "",
+                    lock.actor if lock else "",
+                    _json(decision.model_dump(mode="json")),
+                    now,
+                    now,
+                )
+            ],
+            column_names=[
+                "decision_id",
+                "lead_id",
+                "run_id",
+                "phase",
+                "r0_digest",
+                "pack_digest",
+                "actor",
+                "payload",
+                "created_at",
+                "updated_at",
+            ],
+        )
+
+    def get_chp_decision(self, lead_id: str) -> Optional[ChpDecision]:
+        self._ensure_seed()
+        result = self._q(
+            "SELECT payload FROM chp_decisions FINAL WHERE lead_id = {id:String} "
+            "ORDER BY updated_at DESC LIMIT 1",
+            {"id": lead_id},
+        )
+        if not result.result_rows:
+            return None
+        payload = result.result_rows[0][0]
+        if isinstance(payload, str):
+            payload = json.loads(payload or "{}")
+        return ChpDecision.model_validate(payload)
 
     def _lead_from_row(self, result: Any) -> Lead:
         mapping = dict(zip(result.column_names, result.result_rows[0]))

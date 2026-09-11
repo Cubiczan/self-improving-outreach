@@ -25,7 +25,8 @@ Every lead — mock or live — goes through the same closed loop:
 2. **Score** — Deterministic ICP math from ClickHouse `icp_weights` (**not** CrewAI). Whatever features you store are multiplied by those weights. The demo set includes examples such as `material_weakness_or_sox`, `cfo_cio_title`, and `finance_ops_pain`.
 3. **Draft** — If live LLM keys are on (`MOCK_MODE=false` plus OpenAI or Boundless), CrewAI runs a **sequential** crew: Researcher → Scorer → Drafter → Critic. The critic’s body becomes the outreach draft. If CrewAI is off or the LLM call fails, Drafter fills the highest-scoring `message_patterns` template.
 4. **Critic (code)** — Second pass for **Cubiczan** brand spelling (never CubicZan) and overclaims (`guarantee`, length). Revises the body in place.
-5. **Gate + log + learn** — Human-gate stub, `outreach_event` in ClickHouse (or the in-memory store). Live production waits for Scout `learn` events unless `LEARN_ON_DRAFT=true`. Mock + `SIMULATE_OUTCOMES=true` still updates the Learner after each draft so a demo batch visibly shifts weights.
+5. **CHP decision lock** (live default) — Sealed R0 foundation from independently hashed research / score / draft, then a non-skippable structural adversary, then `provisional`. A **named human** must `approve` or `deny`. Approve seals an immutable evidence pack (`R0 + adversary + lock`) and is the only path to `locked` → `approved_for_scout`. Mock CI leaves this off unless `CHP_LOCK_ENABLED=true`.
+6. **Gate + log + learn** — Human-gate stub when CHP is off; `outreach_event` in ClickHouse (or the in-memory store). Live production waits for Scout `learn` events unless `LEARN_ON_DRAFT=true`. Mock + `SIMULATE_OUTCOMES=true` still updates the Learner after each draft so a demo batch visibly shifts weights. Score math and Learner weights stay deterministic Python.
 
 When CrewAI is off (mock / no OpenAI or Boundless): the **same pipeline still runs** with template drafts from winning patterns. That is how CI and dry runs work.
 
@@ -64,10 +65,17 @@ uv run python -m self_improving_outreach learn --event \
 ### What does not auto-send
 
 ```text
-research → score → draft → critic → human-gate → approved_for_scout
+research → score → draft → critic → R0 seal → adversary → provisional
+                                              → named lock → evidence pack → locked
+                                              → approved_for_scout
 ```
 
-Send stays with Pipeline Scout (out of band). `HUMAN_GATE_ENABLED=true` writes `pending_approvals.jsonl` and holds the lead at `pending_review` instead of `approved_for_scout`.
+Send stays with Pipeline Scout (out of band). This repo never posts. When `CHP_LOCK_ENABLED` resolves true (default on live), `approved_for_scout` requires `locked` plus a verified pack. `HUMAN_GATE_ENABLED=true` still writes `pending_approvals.jsonl` when CHP is off.
+
+```bash
+uv run python -m self_improving_outreach chp show --lead-id <uuid>
+uv run python -m self_improving_outreach chp lock --lead-id <uuid> --approve --actor "Sam Desigan"
+```
 
 ---
 
@@ -94,7 +102,8 @@ flowchart TB
     S[2 Score<br/>ICP weights — not CrewAI]
     D[3 Draft<br/>CrewAI sequential crew or template]
     C[4 Critic code<br/>Cubiczan / overclaims]
-    G[5 Human-gate stub]
+    CHP[CHP lock<br/>R0 + adversary + named human]
+    G[5 Gate / pack]
     L[Learner]
   end
 
@@ -119,9 +128,10 @@ flowchart TB
   W1 & W2 & WN --> worker
   OneYou -.-> R
   R -->|retry once then cache| FAIL
-  R --> S --> D --> C --> G --> EV
+  R --> S --> D --> C --> CHP --> G --> EV
   D -.-> Crew
-  G -->|approved_for_scout| Scout
+  CHP -->|provisional until named lock| G
+  G -->|locked pack → approved_for_scout| Scout
   EV --> L
   L --> WTS
   L --> PAT
@@ -141,6 +151,7 @@ sequenceDiagram
   participant You as One you / You.com
   participant Store as ClickHouse / memory
   participant Crew as CrewAI (live only)
+  participant CHP as CHP lock
   participant Scout as Pipeline Scout
 
   loop each batch (--once or --loop)
@@ -159,13 +170,18 @@ sequenceDiagram
         Sw->>Store: template from top message_patterns
       end
       Sw->>Store: code critic + outreach_event
+      alt CHP_LOCK_ENABLED (default live)
+        Sw->>CHP: seal R0 then structural adversary
+        CHP-->>Sw: provisional (not approved_for_scout)
+        Note over CHP: Named human lock seals<br/>immutable evidence pack
+      end
       alt mock SIMULATE_OUTCOMES or LEARN_ON_DRAFT
         Sw->>Store: Learner updates weights / patterns
       else live
         Note over Scout: Learner waits for Scout learn events
       end
     end
-    Note over Scout: Send is out of band.<br/>This repo stops at approved_for_scout.
+    Note over Scout: Send is out of band.<br/>approved_for_scout requires locked pack when CHP is on.
   end
 ```
 
@@ -248,6 +264,7 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 | `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Optional post-draft transcript→Learner hook (or interview stub when LiveKit is configured) |
 | `CLICKUP_API_TOKEN`, `CLICKUP_LIST_ID`, `CLICKUP_QUEUE_STATUS` | Optional ClickUp list poll (`clickup-sync`) |
 | `MOCK_MODE`, `HUMAN_GATE_ENABLED`, `SIMULATE_OUTCOMES` | Runtime behavior |
+| `CHP_LOCK_ENABLED`, `CHP_DECISIONS_PATH` | CHP decision lock (default true on live; named lock + evidence pack) |
 | `LEARN_ON_DRAFT`, `MOCK_LEARN_OUTCOMES` | Opt-in draft-time Learner on the live path (default `false`) |
 
 ### `show-config`
@@ -256,7 +273,7 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 uv run python -m self_improving_outreach show-config
 ```
 
-Prints **booleans, provider names, and effective paths only** — never secret values. Use it to confirm `mock_mode`, `crewai`, `llm_provider`, `research_provider` (`one` / `you` / `mock`), `sandbox_provider` (`one` / `daytona` / `none`), `one_you_configured`, `learn_on_draft`, and `should_learn_on_draft`.
+Prints **booleans, provider names, and effective paths only** — never secret values. Use it to confirm `mock_mode`, `crewai`, `chp_lock_enabled`, `llm_provider`, `research_provider` (`one` / `you` / `mock`), `sandbox_provider` (`one` / `daytona` / `none`), `one_you_configured`, `learn_on_draft`, and `should_learn_on_draft`.
 
 ---
 
@@ -264,7 +281,7 @@ Prints **booleans, provider names, and effective paths only** — never secret v
 
 ### ClickHouse
 
-Schema: `migrations/clickhouse/001_init.sql` (`leads`, `outreach_events`, `message_patterns`, `icp_weights`, `tool_failures`, `agent_runs`).
+Schema: `migrations/clickhouse/001_init.sql` plus `002_chp_lock.sql` (`leads`, `outreach_events`, `message_patterns`, `icp_weights`, `tool_failures`, `agent_runs`, `chp_decisions`).
 
 ```bash
 docker compose up -d

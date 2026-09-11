@@ -78,6 +78,10 @@ def resolve_lead_from_sample(
 DONE_STATUSES = {
     LeadStatus.DRAFTED,
     LeadStatus.PENDING_REVIEW,
+    LeadStatus.EXPLORING,
+    LeadStatus.ADVISORY,
+    LeadStatus.PROVISIONAL,
+    LeadStatus.LOCKED,
     LeadStatus.APPROVED_FOR_SCOUT,
     LeadStatus.LEARNED,
 }

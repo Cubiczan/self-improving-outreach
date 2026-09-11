@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     clickhouse_database: str = "outreach"
 
     human_gate_enabled: bool = False
+    chp_lock_enabled: Optional[bool] = None
+    chp_decisions_path: str = "chp_decisions.jsonl"
     default_channel: str = "linkedin"
     swarm_concurrency: int = 5
     swarm_interval_seconds: int = 300
@@ -232,6 +234,13 @@ class Settings(BaseSettings):
         return (not self.is_mock) and self.has_llm_credentials
 
     @property
+    def resolved_chp_lock_enabled(self) -> bool:
+        """Explicit CHP_LOCK_ENABLED wins; otherwise true on live, false in mock."""
+        if self.chp_lock_enabled is not None:
+            return self.chp_lock_enabled
+        return not self.is_mock
+
+    @property
     def should_learn_on_draft(self) -> bool:
         """Draft→Learner is opt-in for live; mock + SIMULATE_OUTCOMES still demos it."""
         if self.learn_on_draft or self.mock_learn_outcomes:
@@ -273,6 +282,7 @@ def public_settings_view(settings: Settings) -> dict[str, Any]:
         "clickup_configured": settings.clickup_configured,
         "clickup_list_id": settings.clickup_list_id,
         "crewai": settings.use_crewai,
+        "chp_lock_enabled": settings.resolved_chp_lock_enabled,
         "sample_queue": str(sample_queue_path()),
     }
 
