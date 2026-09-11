@@ -62,7 +62,7 @@ Marketing Hunter or an AE MAY run a preference interview (LiveKit or a saved tra
 
 ### Requirement: Opt-in learn on draft
 
-After a successful draft / `approved_for_scout`, the pipeline SHALL call `simulate_outcome` and `apply_learn_event` when `LEARN_ON_DRAFT=true`, or when mock-style simulate is enabled (`SIMULATE_OUTCOMES=true` and mock mode). Production live mode SHALL default to learn-from-real-outcomes only (`LEARN_ON_DRAFT=false`).
+After a successful draft / `approved_for_scout`, the pipeline SHALL call `simulate_outcome` and `apply_learn_event` when `LEARN_ON_DRAFT=true`, `MOCK_LEARN_OUTCOMES=true`, `swarm --learn-simulated`, or when mock-style simulate is enabled (`SIMULATE_OUTCOMES=true` and mock mode). Production live mode SHALL default to learn-from-real-outcomes only. Real replies, meetings, and ignores SHALL come from Pipeline Scout, ClickUp, LiveKit / `voice`, or `learn --event`.
 
 #### Scenario: Demo live path learns on draft
 
@@ -73,10 +73,16 @@ After a successful draft / `approved_for_scout`, the pipeline SHALL call `simula
 
 #### Scenario: Production live path waits for Scout
 
-- GIVEN `MOCK_MODE=false` and `LEARN_ON_DRAFT=false`
+- GIVEN `MOCK_MODE=false` and no `LEARN_ON_DRAFT` / `MOCK_LEARN_OUTCOMES`
 - WHEN a lead draft succeeds with no explicit `--outcome`
 - THEN the pipeline SHALL NOT simulate an outcome
 - AND `learned` remains false unless LiveKit auto feedback applies
+
+#### Scenario: LiveKit auto stub without transcript path
+
+- GIVEN `LIVEKIT_FEEDBACK_AUTO=true`, LiveKit URL/key/secret set, and no transcript file
+- WHEN the pipeline draft succeeds
+- THEN the preference-interview stub writes a Learner event with `metadata.source=livekit`
 
 ### Requirement: Scout learn CLI
 

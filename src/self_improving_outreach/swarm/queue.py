@@ -75,6 +75,28 @@ def resolve_lead_from_sample(
     return None
 
 
+DONE_STATUSES = {
+    LeadStatus.DRAFTED,
+    LeadStatus.PENDING_REVIEW,
+    LeadStatus.APPROVED_FOR_SCOUT,
+    LeadStatus.LEARNED,
+}
+
+RECLAIM_ALIASES: dict[str, set[LeadStatus]] = {
+    "processing": {LeadStatus.PROCESSING},
+    "failed": {LeadStatus.FAILED},
+    "done": set(DONE_STATUSES),
+}
+
+
+def parse_requeue_status(value: str) -> set[LeadStatus]:
+    """Map CLI --status processing|failed|done (or a LeadStatus value) to statuses."""
+    key = (value or "").strip().lower().replace("-", "_")
+    if key in RECLAIM_ALIASES:
+        return set(RECLAIM_ALIASES[key])
+    return {LeadStatus(key)}
+
+
 def requeue_leads(
     store: OutreachStore,
     *,
@@ -82,12 +104,13 @@ def requeue_leads(
     company: Optional[str] = None,
     all_sample: bool = False,
     clear_processing: bool = False,
+    statuses: Optional[set[LeadStatus]] = None,
     sample_path: str | Path | None = None,
 ) -> list[Lead]:
     """Set matching leads back to queued. Sample file is never overwritten."""
-    if not any((lead_ids, company, all_sample, clear_processing)):
+    if not any((lead_ids, company, all_sample, clear_processing, statuses)):
         raise ValueError(
-            "Provide --lead-id, --company, --all-sample, and/or --clear-processing"
+            "Provide --lead-id, --company, --all-sample, --clear-processing, and/or --status"
         )
     requeued: dict[str, Lead] = {}
 
@@ -131,6 +154,10 @@ def requeue_leads(
 
     if clear_processing:
         for lead in store.list_leads(status=LeadStatus.PROCESSING, limit=10_000):
+            _mark(lead)
+
+    for status in statuses or set():
+        for lead in store.list_leads(status=status, limit=10_000):
             _mark(lead)
 
     return list(requeued.values())

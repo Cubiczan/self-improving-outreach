@@ -6,13 +6,27 @@ task lands in status=Queued. No Google Ads, Facebook Ads, or Meta Ads paths.
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Any, Optional, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from self_improving_outreach.config import Settings
 from self_improving_outreach.models import Lead, LeadStatus
 
+logger = logging.getLogger(__name__)
+
 QUEUED_STATUS = "queued"
+CLICKUP_API_BASE = "https://api.clickup.com/api/v2"
+DEFAULT_SALES_LEADS_LIST_ID = "901716996906"
+IN_FLIGHT = {
+    LeadStatus.PROCESSING,
+    LeadStatus.DRAFTED,
+    LeadStatus.PENDING_REVIEW,
+    LeadStatus.APPROVED_FOR_SCOUT,
+    LeadStatus.LEARNED,
+    LeadStatus.FAILED,
+}
 
 _COMPANY_KEYS = frozenset(
     {"company", "company_name", "account", "account_name", "org", "organization"}
@@ -221,10 +235,128 @@ def ingest_clickup_payload(
     data: dict[str, Any],
     *,
     force: bool = False,
+    reset_status: bool = True,
 ) -> ClickUpIngestResult:
     result = lead_from_clickup(data, force=force)
     if result.skipped or result.lead is None:
         return result
+    existing = store.get_lead(result.lead.lead_id)
+    if existing is not None and not reset_status and existing.status in IN_FLIGHT:
+        result.lead.status = existing.status
+        result.lead.signals = {**existing.signals, **result.lead.signals}
+        if existing.cached_context and not result.lead.cached_context:
+            result.lead.cached_context = existing.cached_context
     store.upsert_lead(result.lead)
     stored = store.get_lead(result.lead.lead_id) or result.lead
     return result.model_copy(update={"lead": stored})
+
+
+class ClickUpPollReport(BaseModel):
+    list_id: str
+    status: str
+    fetched: int = 0
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    lead_ids: list[str] = Field(default_factory=list)
+    dry_run: bool = False
+
+
+class ClickUpClient(Protocol):
+    def list_tasks(self, list_id: str, statuses: list[str]) -> list[dict[str, Any]]: ...
+
+
+class MockClickUpClient:
+    """In-memory ClickUp client for CI. No HTTP."""
+
+    def __init__(self, tasks: Optional[list[dict[str, Any]]] = None) -> None:
+        self.tasks = list(tasks or [])
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def list_tasks(self, list_id: str, statuses: list[str]) -> list[dict[str, Any]]:
+        self.calls.append((list_id, tuple(statuses)))
+        wanted = {item.strip().lower() for item in statuses}
+        rows = []
+        for task in self.tasks:
+            status = clickup_status_name(task)
+            if not wanted or status.lower() in wanted:
+                rows.append(task)
+        return rows
+
+
+class HttpClickUpClient:
+    def __init__(self, token: str, *, base_url: str = CLICKUP_API_BASE, timeout: float = 30.0) -> None:
+        self.token = token
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def list_tasks(self, list_id: str, statuses: list[str]) -> list[dict[str, Any]]:
+        import httpx
+
+        tasks: list[dict[str, Any]] = []
+        page = 0
+        while True:
+            params: list[tuple[str, str]] = [("page", str(page)), ("include_closed", "false")]
+            for status in statuses:
+                params.append(("statuses[]", status))
+            response = httpx.get(
+                f"{self.base_url}/list/{list_id}/task",
+                headers={"Authorization": self.token, "Accept": "application/json"},
+                params=params,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            batch = payload.get("tasks") or []
+            tasks.extend(batch)
+            if payload.get("last_page") or not batch:
+                break
+            page += 1
+        return tasks
+
+
+def build_clickup_client(settings: Settings, client: Optional[ClickUpClient] = None) -> Optional[ClickUpClient]:
+    if client is not None:
+        return client
+    if not settings.clickup_api_token:
+        return None
+    return HttpClickUpClient(settings.clickup_api_token)
+
+
+def sync_clickup_list(
+    store,
+    client: ClickUpClient,
+    *,
+    list_id: str = DEFAULT_SALES_LEADS_LIST_ID,
+    status: str = "Queued",
+    dry_run: bool = False,
+) -> ClickUpPollReport:
+    """Poll a ClickUp list into the store. Reuses lead_from_clickup; does not reset in-flight."""
+    report = ClickUpPollReport(list_id=list_id, status=status, dry_run=dry_run)
+    tasks = client.list_tasks(list_id, [status])
+    report.fetched = len(tasks)
+    for task in tasks:
+        try:
+            mapped = lead_from_clickup(task)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Skipping ClickUp task: %s", exc)
+            report.skipped += 1
+            continue
+        if mapped.skipped or mapped.lead is None:
+            report.skipped += 1
+            continue
+        existing = store.get_lead(mapped.lead.lead_id)
+        if dry_run:
+            report.lead_ids.append(mapped.lead.lead_id)
+            if existing is None:
+                report.created += 1
+            else:
+                report.updated += 1
+            continue
+        ingest_clickup_payload(store, task, reset_status=False)
+        report.lead_ids.append(mapped.lead.lead_id)
+        if existing is None:
+            report.created += 1
+        else:
+            report.updated += 1
+    return report

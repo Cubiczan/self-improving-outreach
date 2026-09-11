@@ -52,7 +52,7 @@ If ClickHouse is unset, an in-memory store keeps the same semantics so mock mode
 - Pipeline Scout outcomes (after a real send, out of band)
 - optional LiveKit preference interviews (`metadata.source=livekit`)
 
-`SIMULATE_OUTCOMES=true` in mock mode invents an outcome from the score + angle so a demo swarm **visibly shifts weights** across batches. In the shipped example data, material-weakness and treasury angles win more often in that simulator. On the live path, set `LEARN_ON_DRAFT=true` only for demos; production should wait for real Scout outcomes.
+`SIMULATE_OUTCOMES=true` in mock mode invents an outcome from the score + angle so a demo swarm **visibly shifts weights** across batches. In the shipped example data, material-weakness and treasury angles win more often in that simulator. On the live path, `drafted` does **not** invent CRM replies unless `LEARN_ON_DRAFT=true`, `MOCK_LEARN_OUTCOMES=true`, or `swarm --learn-simulated`. Production should wait for real Scout / ClickUp / LiveKit outcomes.
 
 ```bash
 uv run python -m self_improving_outreach learn --event \
@@ -202,6 +202,11 @@ uv run python -m self_improving_outreach requeue --lead-id 11111111-1111-1111-11
 uv run python -m self_improving_outreach requeue --company "Northline"
 uv run python -m self_improving_outreach requeue --all-sample
 uv run python -m self_improving_outreach requeue --clear-processing
+uv run python -m self_improving_outreach requeue --status processing
+uv run python -m self_improving_outreach requeue --status failed
+uv run python -m self_improving_outreach requeue --status done          # drafted / approved / learned
+uv run python -m self_improving_outreach swarm --once --requeue        # reclaim processing+failed, then claim
+uv run python -m self_improving_outreach swarm --once --learn-simulated
 ```
 
 Ingest a ClickUp **Queued** task (or webhook envelope with a `task` object) into the same queue. Search + outreach only.
@@ -212,6 +217,15 @@ uv run python -m self_improving_outreach queue upsert --from-json '{"company":"A
 ```
 
 Non-Queued ClickUp tasks are skipped unless you pass `--force`.
+
+Poll the Sales Leads list (default `CLICKUP_LIST_ID=901716996906`) when you have a token. Re-poll is idempotent and does not reset an in-flight lead:
+
+```bash
+uv run python -m self_improving_outreach clickup-sync
+uv run python -m self_improving_outreach clickup-sync --dry-run
+```
+
+Optional GitHub Action stub: `.github/workflows/clickup-sync.yml` (`workflow_dispatch` only).
 
 ### Live env (names only — never commit values)
 
@@ -231,9 +245,10 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_PORT`, `CLICKHOUSE_SECURE` | ClickHouse Cloud or local |
 | `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona SDK + OTEL traces (fallback when One Daytona is unset) |
 | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Optional live voice room (not required for transcript ingest) |
-| `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Optional post-draft transcript→Learner hook (default `false`) |
+| `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Optional post-draft transcript→Learner hook (or interview stub when LiveKit is configured) |
+| `CLICKUP_API_TOKEN`, `CLICKUP_LIST_ID`, `CLICKUP_QUEUE_STATUS` | Optional ClickUp list poll (`clickup-sync`) |
 | `MOCK_MODE`, `HUMAN_GATE_ENABLED`, `SIMULATE_OUTCOMES` | Runtime behavior |
-| `LEARN_ON_DRAFT` | Opt-in draft-time Learner on the live path (default `false`) |
+| `LEARN_ON_DRAFT`, `MOCK_LEARN_OUTCOMES` | Opt-in draft-time Learner on the live path (default `false`) |
 
 ### `show-config`
 
@@ -323,7 +338,7 @@ uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111
 uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111-111111111111 --transcript-file data/voice_transcript.sample.json
 ```
 
-After a draft, `LIVEKIT_FEEDBACK_AUTO=true` plus `LIVEKIT_TRANSCRIPT_PATH` (file or `{lead_id}.json` directory) calls `record_voice_feedback` and writes `outreach_event` with `metadata.source=livekit`. If the flag is on but no transcript file exists, the draft still succeeds.
+After a draft, `LIVEKIT_FEEDBACK_AUTO=true` plus `LIVEKIT_TRANSCRIPT_PATH` (file or `{lead_id}.json` directory) calls `record_voice_feedback` and writes `outreach_event` with `metadata.source=livekit`. If LiveKit is configured and no transcript file exists, the preference-interview stub applies a sample transcript (`metadata.stub=true`). Without LiveKit keys and without a file, auto is a no-op.
 
 ---
 

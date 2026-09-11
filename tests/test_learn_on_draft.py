@@ -68,6 +68,36 @@ def test_mock_simulate_still_learns():
     assert result.learned is True
 
 
+def test_mock_learn_outcomes_alias_enables_live_learn():
+    settings = Settings(mock_mode=False, mock_learn_outcomes=True, simulate_outcomes=False)
+    assert settings.should_learn_on_draft is True
+    pipeline, store = _pipeline(settings)
+    result = pipeline.run(_cfo_lead())
+    assert result.ok
+    assert result.learned is True
+
+
+def test_cli_swarm_learn_simulated_flag():
+    from self_improving_outreach.runtime import SAMPLE_QUEUE
+
+    result = runner.invoke(
+        app,
+        [
+            "swarm",
+            "--once",
+            "--learn-simulated",
+            "--concurrency",
+            "1",
+            "--queue",
+            str(SAMPLE_QUEUE),
+            "--max-leads",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "succeeded" in result.stdout
+
+
 def test_cli_learn_meeting_updates_sample_lead():
     result = runner.invoke(
         app,

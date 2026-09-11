@@ -16,11 +16,18 @@ from self_improving_outreach.brand import BRAND, FOUNDER, POSITIONING
 from self_improving_outreach.config import Settings
 from self_improving_outreach.learning.learner import apply_learn_event
 from self_improving_outreach.models import Channel, Lead, LearnEvent, Outcome, OutreachEvent, new_id
+from self_improving_outreach.paths import sample_voice_transcript_path
 from self_improving_outreach.stores.base import OutreachStore
 from self_improving_outreach.voice.transcript import (
     VoiceTranscriptFeedback,
     parse_voice_transcript_file,
     resolve_transcript_path,
+)
+
+STUB_NOTES = (
+    "LIVEKIT_FEEDBACK_AUTO stub: preference interview enqueued "
+    "(async AgentSession). Sample transcript applied so the Learner path runs. "
+    "Replace with a real AE interview or LIVEKIT_TRANSCRIPT_PATH."
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +63,7 @@ def record_voice_feedback(
     pattern_id: Optional[str] = None,
     run_id: Optional[str] = None,
     auto: bool = False,
+    stub: bool = False,
 ) -> dict[str, float]:
     """Called after a voice interview (or a mock transcript) to feed the Learner."""
     outcome = Outcome.THUMBS_UP if positive else Outcome.THUMBS_DOWN
@@ -86,6 +94,7 @@ def record_voice_feedback(
                 "positive": positive,
                 "notes": notes or "livekit_voice_interview",
                 "auto": auto,
+                "stub": stub,
             },
         )
     )
@@ -99,6 +108,7 @@ def record_transcript_feedback(
     *,
     run_id: Optional[str] = None,
     auto: bool = False,
+    stub: bool = False,
 ) -> dict[str, float]:
     return record_voice_feedback(
         store,
@@ -108,6 +118,7 @@ def record_transcript_feedback(
         pattern_id=feedback.pattern_id,
         run_id=run_id,
         auto=auto,
+        stub=stub,
     )
 
 
@@ -128,25 +139,78 @@ def maybe_apply_auto_voice_feedback(
         lead.lead_id,
         override=transcript_path,
     )
-    if path is None:
-        logger.info("LIVEKIT_FEEDBACK_AUTO set but no transcript found for %s", lead.lead_id)
-        return False
-    try:
-        feedback = parse_voice_transcript_file(path)
-    except ValueError as exc:
-        logger.warning("Skipping auto voice transcript %s: %s", path, exc)
-        return False
-    if feedback.lead_id and feedback.lead_id != lead.lead_id:
-        logger.warning(
-            "Transcript lead_id %s does not match pipeline lead %s; skipping",
-            feedback.lead_id,
+    if path is not None:
+        try:
+            feedback = parse_voice_transcript_file(path)
+        except ValueError as exc:
+            logger.warning("Skipping auto voice transcript %s: %s", path, exc)
+            return False
+        if feedback.lead_id and feedback.lead_id != lead.lead_id:
+            logger.warning(
+                "Transcript lead_id %s does not match pipeline lead %s; skipping",
+                feedback.lead_id,
+                lead.lead_id,
+            )
+            return False
+        if not feedback.pattern_id and pattern_id:
+            feedback = feedback.model_copy(update={"pattern_id": pattern_id})
+        record_transcript_feedback(store, lead, feedback, run_id=run_id, auto=True)
+        return True
+    if livekit_configured(settings):
+        logger.info(
+            "LIVEKIT_FEEDBACK_AUTO: no transcript for %s; running preference-interview stub",
             lead.lead_id,
         )
-        return False
-    if not feedback.pattern_id and pattern_id:
-        feedback = feedback.model_copy(update={"pattern_id": pattern_id})
-    record_transcript_feedback(store, lead, feedback, run_id=run_id, auto=True)
-    return True
+        enqueue_preference_interview_stub(
+            store,
+            lead,
+            run_id=run_id,
+            pattern_id=pattern_id,
+        )
+        return True
+    logger.info("LIVEKIT_FEEDBACK_AUTO set but no transcript found for %s", lead.lead_id)
+    return False
+
+
+def enqueue_preference_interview_stub(
+    store: OutreachStore,
+    lead: Lead,
+    *,
+    run_id: Optional[str] = None,
+    pattern_id: Optional[str] = None,
+) -> dict[str, float]:
+    """Documented stub: full AgentSession is async. Apply a sample transcript to the Learner."""
+    feedback = _sample_stub_feedback(lead, pattern_id)
+    return record_transcript_feedback(
+        store,
+        lead,
+        feedback,
+        run_id=run_id,
+        auto=True,
+        stub=True,
+    )
+
+
+def _sample_stub_feedback(
+    lead: Lead,
+    pattern_id: Optional[str],
+) -> VoiceTranscriptFeedback:
+    sample = sample_voice_transcript_path()
+    if sample.is_file():
+        try:
+            feedback = parse_voice_transcript_file(sample)
+            updates: dict = {"lead_id": lead.lead_id, "notes": STUB_NOTES}
+            if pattern_id:
+                updates["pattern_id"] = pattern_id
+            return feedback.model_copy(update=updates)
+        except ValueError as exc:
+            logger.warning("Sample voice transcript unreadable (%s); using inline stub", exc)
+    return VoiceTranscriptFeedback(
+        positive=True,
+        notes=STUB_NOTES,
+        pattern_id=pattern_id,
+        lead_id=lead.lead_id,
+    )
 
 
 def build_agent_server(settings: Settings):

@@ -5,7 +5,12 @@ import pytest
 from typer.testing import CliRunner
 
 from self_improving_outreach.cli import app
-from self_improving_outreach.integrations.clickup import ingest_clickup_payload, lead_from_clickup
+from self_improving_outreach.integrations.clickup import (
+    MockClickUpClient,
+    ingest_clickup_payload,
+    lead_from_clickup,
+    sync_clickup_list,
+)
 from self_improving_outreach.models import LeadStatus
 from self_improving_outreach.stores.memory import MemoryStore
 from self_improving_outreach.swarm.queue import load_json_leads
@@ -115,3 +120,34 @@ def test_cli_queue_upsert_from_json(tmp_path: Path):
 def test_clickup_requires_company():
     with pytest.raises(ValueError, match="company"):
         lead_from_clickup({"id": "empty", "status": "Queued"})
+
+
+def test_clickup_sync_poll_is_idempotent_and_keeps_in_flight():
+    store = MemoryStore()
+    payload = json.loads(SAMPLE_CLICKUP.read_text(encoding="utf-8"))
+    task = payload.get("task") or payload
+    client = MockClickUpClient([task])
+    first = sync_clickup_list(store, client, list_id="901716996906")
+    assert first.created == 1
+    lead_id = first.lead_ids[0]
+    store.set_lead_status(lead_id, LeadStatus.PROCESSING)
+    second = sync_clickup_list(store, client, list_id="901716996906")
+    assert second.created == 0
+    assert second.updated == 1
+    assert store.get_lead(lead_id).status == LeadStatus.PROCESSING
+
+
+def test_clickup_sync_dry_run_does_not_write():
+    store = MemoryStore()
+    payload = json.loads(SAMPLE_CLICKUP.read_text(encoding="utf-8"))
+    task = payload.get("task") or payload
+    report = sync_clickup_list(store, MockClickUpClient([task]), dry_run=True)
+    assert report.created == 1
+    assert report.dry_run is True
+    assert store.list_leads() == []
+
+
+def test_cli_clickup_sync_skips_without_token():
+    result = runner.invoke(app, ["clickup-sync"])
+    assert result.exit_code == 0, result.stdout
+    assert "CLICKUP_API_TOKEN" in result.stdout

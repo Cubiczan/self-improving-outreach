@@ -12,7 +12,7 @@ from rich.table import Table
 
 from self_improving_outreach import brand
 from self_improving_outreach.config import get_settings, public_settings_view, reset_settings_cache
-from self_improving_outreach.integrations.clickup import ingest_clickup_payload
+from self_improving_outreach.integrations.clickup import ingest_clickup_payload, sync_clickup_list
 from self_improving_outreach.learning.learner import apply_learn_event
 from self_improving_outreach.models import LeadStatus, LearnEvent, Outcome
 from self_improving_outreach.runtime import build_runtime, build_swarm
@@ -20,6 +20,7 @@ from self_improving_outreach.swarm.queue import (
     JsonLeadQueue,
     lead_from_mapping,
     mappings_from_json_payload,
+    parse_requeue_status,
     requeue_leads,
     resolve_lead_from_sample,
     upsert_leads_from_mappings,
@@ -105,6 +106,16 @@ def swarm(
     queue: Optional[Path] = typer.Option(None, help="JSON queue path (mock default: data/leads.sample.json)"),
     max_leads: Optional[int] = typer.Option(None, help="Cap leads in this batch"),
     max_batches: Optional[int] = typer.Option(None, help="Cap loop iterations (tests)"),
+    learn_simulated: bool = typer.Option(
+        False,
+        "--learn-simulated",
+        help="After draft, apply simulate_outcome (demo). Live drafted does not invent CRM replies unless set.",
+    ),
+    requeue: bool = typer.Option(
+        False,
+        "--requeue",
+        help="Set processing/failed leads back to queued before claiming",
+    ),
 ) -> None:
     """Run N parallel closed-loop crews over the ClickHouse or JSON lead queue."""
     if loop and once:
@@ -112,11 +123,19 @@ def swarm(
     if not loop:
         once = True
     settings = get_settings()
+    if learn_simulated:
+        settings = settings.model_copy(update={"learn_on_draft": True})
     orchestrator = build_swarm(
         settings,
         concurrency=concurrency,
         queue_path=str(queue) if queue else None,
     )
+    if requeue:
+        reclaimed = requeue_leads(
+            orchestrator.store,
+            statuses={LeadStatus.PROCESSING, LeadStatus.FAILED},
+        )
+        console.print(f"Requeued {len(reclaimed)} processing/failed leads")
     if once:
         report = orchestrator.run_once(max_leads=max_leads)
         _print_swarm(report)
@@ -205,10 +224,15 @@ def requeue(
         "--clear-processing",
         help="Set stuck processing leads back to queued",
     ),
+    status: Optional[str] = typer.Option(
+        None,
+        "--status",
+        help="processing | failed | done (drafted/approved/learned) or a LeadStatus value",
+    ),
     queue: Optional[Path] = typer.Option(None, help="Persistable JSON queue (never overwrites the sample file)"),
 ) -> None:
     """Set leads back to queued so the swarm can claim them again."""
-    _run_requeue(lead_id, company, all_sample, clear_processing, queue)
+    _run_requeue(lead_id, company, all_sample, clear_processing, queue, status)
 
 
 @queue_app.command("reset")
@@ -217,10 +241,11 @@ def queue_reset(
     company: Optional[str] = typer.Option(None),
     all_sample: bool = typer.Option(False, "--all-sample"),
     clear_processing: bool = typer.Option(False, "--clear-processing"),
+    status: Optional[str] = typer.Option(None, "--status"),
     queue: Optional[Path] = typer.Option(None),
 ) -> None:
     """Alias for requeue."""
-    _run_requeue(lead_id, company, all_sample, clear_processing, queue)
+    _run_requeue(lead_id, company, all_sample, clear_processing, queue, status)
 
 
 @queue_app.command("upsert")
@@ -273,6 +298,39 @@ def ingest_clickup(
     )
 
 
+@app.command("clickup-sync")
+def clickup_sync(
+    list_id: Optional[str] = typer.Option(
+        None,
+        help="ClickUp list id (default CLICKUP_LIST_ID / Sales Leads 901716996906)",
+    ),
+    status: Optional[str] = typer.Option(
+        None,
+        help="ClickUp task status to ingest (default Queued / CLICKUP_QUEUE_STATUS)",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Map tasks without writing the store"),
+    queue: Optional[Path] = typer.Option(None, help="Persistable JSON queue"),
+) -> None:
+    """Poll ClickUp Queued tasks into the lead queue (idempotent by ClickUp task id)."""
+    from self_improving_outreach.integrations.clickup import build_clickup_client
+
+    settings = get_settings()
+    client = build_clickup_client(settings)
+    if client is None:
+        console.print("CLICKUP_API_TOKEN not set; skip clickup-sync.")
+        raise typer.Exit(0)
+    store, json_queue = _store_with_optional_queue(queue)
+    report = sync_clickup_list(
+        store,
+        client,
+        list_id=list_id or settings.clickup_list_id,
+        status=status or settings.clickup_queue_status,
+        dry_run=dry_run,
+    )
+    _persist_queue(json_queue)
+    console.print(report.model_dump())
+
+
 def _store_with_optional_queue(queue: Optional[Path]):
     runtime = build_runtime()
     store = runtime["store"]
@@ -302,15 +360,18 @@ def _run_requeue(
     all_sample: bool,
     clear_processing: bool,
     queue: Optional[Path],
+    status: Optional[str] = None,
 ) -> None:
     store, json_queue = _store_with_optional_queue(queue)
     try:
+        statuses = parse_requeue_status(status) if status else None
         leads = requeue_leads(
             store,
             lead_ids=lead_id or None,
             company=company,
             all_sample=all_sample,
             clear_processing=clear_processing,
+            statuses=statuses,
         )
     except (ValueError, KeyError, FileNotFoundError) as exc:
         raise typer.BadParameter(str(exc)) from exc
