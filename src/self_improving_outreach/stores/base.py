@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
-from self_improving_outreach.chp.models import ChpDecision
 from self_improving_outreach.models import (
     AgentRun,
     IcpWeight,
@@ -14,6 +13,9 @@ from self_improving_outreach.models import (
     OutreachEvent,
     ToolFailure,
 )
+
+if TYPE_CHECKING:
+    from self_improving_outreach.chp.models import ChpDecision
 
 
 @runtime_checkable

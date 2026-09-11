@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 import httpx
 
 from self_improving_outreach.models import Lead, ResearchBundle, Snippet, ToolFailure, new_id
-from self_improving_outreach.observability.tracing import RunTracer
-from self_improving_outreach.stores.base import OutreachStore
+
+if TYPE_CHECKING:
+    from self_improving_outreach.observability.tracing import RunTracer
+    from self_improving_outreach.stores.base import OutreachStore
 
 SEARCH_URL = "https://ydc-index.io/v1/search"
 CONTENTS_URL = "https://ydc-index.io/v1/contents"

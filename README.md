@@ -259,7 +259,8 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 | `OPENAI_API_KEY`, `CREWAI_MODEL`, `CREWAI_MODE` | Live CrewAI prose via OpenAI (`off` / `draft` / `full`) |
 | `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL` | OpenAI-compatible Boundless inference |
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_PORT`, `CLICKHOUSE_SECURE` | ClickHouse Cloud or local |
-| `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona SDK + OTEL traces (fallback when One Daytona is unset) |
+| `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona SDK + optional OTEL (fallback when One Daytona is unset) |
+| `DAYTONA_TARGET` or `DAYTONA_REGION` | SDK sandbox region (`us` / `eu`) when the org has no dashboard default |
 | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Optional live voice room (not required for transcript ingest) |
 | `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Optional post-draft transcript→Learner hook (or interview stub when LiveKit is configured) |
 | `CLICKUP_API_TOKEN`, `CLICKUP_LIST_ID`, `CLICKUP_QUEUE_STATUS` | Optional ClickUp list poll (`clickup-sync`) |
@@ -358,7 +359,11 @@ uv run python -m self_improving_outreach swarm --once --concurrency 2
 
 ### Daytona SDK fallback
 
-When One Daytona is not selected and `DAYTONA_API_KEY` plus the `daytona` extra are present, the tracer uses the Daytona SDK. `DAYTONA_SANDBOX_RUNS=true` optionally creates a sandbox per session — not required for drafts. Without the SDK/key, spans still land on `agent_runs.traces`.
+`SANDBOX_PROVIDER=auto` prefers One Daytona when One auth + `ONE_DAYTONA_CONNECTION_KEY` are set; `one` does the same and falls back to the SDK if `DAYTONA_API_KEY` is present; `daytona` skips One and uses the SDK only.
+
+When the SDK path is selected and `DAYTONA_API_KEY` plus the `daytona` extra are present, the tracer uses the Daytona Python SDK. Sandbox create needs an **organization default region** in the [Daytona Dashboard](https://app.daytona.io/) **or** an explicit runner target via `DAYTONA_TARGET` / `DAYTONA_REGION` (`DaytonaConfig.target`, typically `us` or `eu`). Without one of those, create fails with “This organization does not have a default region.”
+
+`DAYTONA_SANDBOX_RUNS=true` optionally creates a sandbox per session — not required for drafts. Local spans always land on `agent_runs.traces`. `DAYTONA_OTEL_ENABLED` is best-effort: if the default OTLP collector (`localhost:4318`) is not running, export is skipped so the process does not hang.
 
 ### LiveKit → Learner
 

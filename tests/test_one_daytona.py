@@ -1,4 +1,9 @@
 import json
+import os
+import subprocess
+import sys
+import types
+from pathlib import Path
 from subprocess import CompletedProcess
 
 from self_improving_outreach.config import Settings
@@ -204,3 +209,192 @@ def test_sandbox_provider_daytona_skips_one():
         one_cli_auth=False,
     )
     assert settings.effective_sandbox_provider == "daytona"
+
+
+def test_merge_sandbox_create_body_optional_target():
+    body = merge_sandbox_create_body({"name": "n"}, target="eu")
+    assert body["target"] == "eu"
+    omitted = merge_sandbox_create_body({"name": "n"}, target="")
+    assert "target" not in omitted
+    caller = merge_sandbox_create_body({"name": "n", "target": "us"}, target="eu")
+    assert caller["target"] == "us"
+
+
+def test_one_daytona_import_avoids_outreach_store_cycle():
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from self_improving_outreach.tools.one_daytona import one_daytona_from_settings\n"
+            "from self_improving_outreach.stores.base import OutreachStore\n"
+            "assert one_daytona_from_settings is not None\n"
+            "assert OutreachStore is not None\n",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
+def test_tracer_one_from_settings_does_not_circular_import():
+    settings = Settings(
+        one_secret="sk-test",
+        one_daytona_connection_key="live::daytona::default::test",
+        daytona_sandbox_runs=False,
+        sandbox_provider="auto",
+        one_cli_auth=False,
+    )
+    tracer = DaytonaTracer(settings, run_id="run-import-1")
+    names = [r["name"] for r in tracer.records()]
+    assert "daytona.client_ready" in names
+    assert "daytona.init_failed" not in names
+    assert tracer.client is not None
+    ready = next(r for r in tracer.records() if r["name"] == "daytona.client_ready")
+    assert ready["attributes"]["provider"] == "one"
+
+
+def _install_fake_daytona(monkeypatch, *, create_error=None):
+    created: dict = {}
+
+    class FakeSandbox:
+        def __init__(self):
+            self.id = "sbx-sdk"
+            self.deleted = False
+
+        def delete(self):
+            self.deleted = True
+
+    class FakeConfig:
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+            created["config"] = self
+
+    class FakeCreateParams:
+        model_fields = {"name": object(), "target": object()}
+
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+            created["params"] = self
+
+    class FakeDaytona:
+        def __init__(self, config):
+            self.config = config
+            created["client"] = self
+
+        def create(self, params=None, **kwargs):
+            if create_error:
+                raise RuntimeError(create_error)
+            created["create_args"] = (params, kwargs)
+            sandbox = FakeSandbox()
+            created["sandbox"] = sandbox
+            return sandbox
+
+        def close(self):
+            created["closed"] = True
+
+    fake = types.ModuleType("daytona")
+    fake.Daytona = FakeDaytona
+    fake.DaytonaConfig = FakeConfig
+    fake.CreateSandboxFromSnapshotParams = FakeCreateParams
+    monkeypatch.setitem(sys.modules, "daytona", fake)
+    return created
+
+
+def test_sdk_create_passes_explicit_target(monkeypatch):
+    created = _install_fake_daytona(monkeypatch)
+    settings = Settings(
+        sandbox_provider="daytona",
+        daytona_api_key="dtn-key",
+        daytona_target="us",
+        daytona_sandbox_runs=True,
+        one_cli_auth=False,
+    )
+    tracer = DaytonaTracer(settings, run_id="run-sdk-1")
+    names = [r["name"] for r in tracer.records()]
+    assert "daytona.client_ready" in names
+    assert "daytona.sandbox_created" in names
+    assert "daytona.init_failed" not in names
+    assert created["config"].target == "us"
+    assert created["config"].otel_enabled is False
+    assert tracer.sandbox is not None
+    assert tracer.sandbox.id == "sbx-sdk"
+    ready = next(r for r in tracer.records() if r["name"] == "daytona.client_ready")
+    assert ready["attributes"]["provider"] == "daytona"
+    assert ready["attributes"]["target"] == "us"
+    tracer.close()
+    assert tracer.sandbox is None
+    assert created["sandbox"].deleted is True
+    assert created.get("closed") is True
+
+
+def test_sdk_region_alias_and_create_failure_event(monkeypatch):
+    created = _install_fake_daytona(
+        monkeypatch,
+        create_error="Failed to create sandbox: This organization does not have a default region.",
+    )
+    settings = Settings(
+        sandbox_provider="daytona",
+        daytona_api_key="dtn-key",
+        daytona_region="eu",
+        daytona_sandbox_runs=True,
+        one_cli_auth=False,
+    )
+    assert settings.resolved_daytona_target == "eu"
+    tracer = DaytonaTracer(settings, run_id="run-sdk-2")
+    assert created["config"].target == "eu"
+    assert tracer.sandbox is None
+    failed = next(r for r in tracer.records() if r["name"] == "daytona.init_failed")
+    assert failed["attributes"]["provider"] == "daytona"
+    assert "default region" in failed["attributes"]["error"]
+    assert any(r["name"] == "daytona.client_ready" for r in tracer.records())
+
+
+def test_otel_unreachable_localhost_does_not_fail_or_hang(monkeypatch):
+    created = _install_fake_daytona(monkeypatch)
+
+    def _refuse(*_args, **_kwargs):
+        raise OSError("Connection refused")
+
+    monkeypatch.setattr("self_improving_outreach.observability.tracing.socket.create_connection", _refuse)
+    settings = Settings(
+        sandbox_provider="daytona",
+        daytona_api_key="dtn-key",
+        daytona_otel_enabled=True,
+        daytona_sandbox_runs=True,
+        one_cli_auth=False,
+    )
+    tracer = DaytonaTracer(settings, run_id="run-otel-1")
+    with tracer.span("local.work"):
+        pass
+    names = [r["name"] for r in tracer.records()]
+    assert "daytona.otel_disabled" in names
+    assert "daytona.client_ready" in names
+    assert "daytona.sandbox_created" in names
+    assert "daytona.init_failed" not in names
+    assert created["config"].otel_enabled is False
+    assert any(r["name"] == "local.work" and r["phase"] == "ok" for r in tracer.records())
+
+
+def test_from_settings_wires_target():
+    calls = []
+
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        return _ok(cmd, {"id": "sbx-target", "state": "started"})
+
+    settings = Settings(
+        one_daytona_connection_key="live::daytona::default::test",
+        daytona_target="us",
+        one_cli_auth=False,
+    )
+    client = one_daytona_from_settings(settings, runner=OneCli(runner=runner))
+    client.create({"name": "named"})
+    created = _execute_data(next(c for c in calls if "-d" in c))
+    assert created["target"] == "us"
