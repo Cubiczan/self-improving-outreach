@@ -28,7 +28,7 @@ _PAIN_KEYS = frozenset({"pain", "signal", "signals", "notes", "why", "hook"})
 
 
 class ClickUpIngestResult(BaseModel):
-    lead: Optional[Lead] = None
+    lead: Lead | None = None
     skipped: bool = False
     reason: str = ""
     clickup_task_id: str = ""
