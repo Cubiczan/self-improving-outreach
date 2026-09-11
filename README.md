@@ -187,6 +187,10 @@ sequenceDiagram
 
 A tool failure in **one** worker switches that worker to the failover path. Other workers keep running. Daytona (or the local tracer) records spans onto `agent_runs`.
 
+![Daytona traces](docs/daytona/daytona-traces.png)
+
+Dashboard screenshot of Daytona **Sandbox Details → Traces** (sandbox `traces-demo`). The tab can stay empty until the sandbox emits telemetry. See [`docs/daytona/`](docs/daytona/).
+
 Behavior specs: [`openspec/specs/`](openspec/specs/) (outreach pipeline, learning loop, swarm, ClickHouse, LLM provider).
 
 ---
@@ -358,7 +362,7 @@ uv run python -m self_improving_outreach swarm --once --concurrency 2
 
 ### Daytona SDK fallback
 
-When One Daytona is not selected and `DAYTONA_API_KEY` plus the `daytona` extra are present, the tracer uses the Daytona SDK. `DAYTONA_SANDBOX_RUNS=true` optionally creates a sandbox per session — not required for drafts. Without the SDK/key, spans still land on `agent_runs.traces`.
+When One Daytona is not selected and `DAYTONA_API_KEY` plus the `daytona` extra are present, the tracer uses the Daytona SDK. `DAYTONA_SANDBOX_RUNS=true` optionally creates a sandbox per session — not required for drafts. Without the SDK/key, spans still land on `agent_runs.traces`. Dashboard Traces can stay empty until the sandbox emits telemetry — see [`docs/daytona/daytona-traces.png`](docs/daytona/daytona-traces.png).
 
 ### LiveKit → Learner
 
@@ -382,6 +386,7 @@ data/leads.sample.json         # 3 example leads (demo ICP)
 data/voice_transcript.sample.json
 data/clickup_task.sample.json  # ClickUp webhook → queued lead
 openspec/specs/                # living behavior specs
+docs/daytona/                  # Daytona Traces screenshot + live retest notes
 ```
 
 Extras: `uv sync --extra crew` · `--extra clickhouse` · `--extra daytona` · `--extra livekit` · `--extra you`.

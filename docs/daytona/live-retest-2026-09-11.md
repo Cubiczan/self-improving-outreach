@@ -26,3 +26,4 @@ See `live-retest-2026-09-11.json` in this folder (sanitized span events only).
 - Earlier failure (“organization does not have a default region”) cleared after Dashboard default region = `us` + `DAYTONA_TARGET=us`.
 - Leave Daytona org OTLP blank until a real Grafana Cloud OTLP endpoint is configured (do not use `otel-collector.example.com`).
 - One Daytona path circular-import fix is tracked separately in PR #11; this document is the **live test record**, not the code change.
+- Dashboard **Traces** view (empty until telemetry): [`daytona-traces.png`](daytona-traces.png) — sandbox `traces-demo`, not this retest id.
