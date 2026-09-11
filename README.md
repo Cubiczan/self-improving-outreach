@@ -134,6 +134,7 @@ uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-111
 | `SANDBOX_PROVIDER` | `auto` (default), `one`, or `daytona` |
 | `ONE_SECRET`, `ONE_CLI`, `ONE_CLI_AUTH` | One CLI auth (`one --agent`); CLI login also works |
 | `ONE_YOU_CONNECTION_KEY`, `ONE_DAYTONA_CONNECTION_KEY` | One connection keys (env only — do not commit live keys) |
+| `ONE_DAYTONA_DOCKERFILE`, `ONE_DAYTONA_SNAPSHOT` | One sandbox create defaults (`buildInfo.dockerfileContent` + optional snapshot) |
 | `YOU_API_KEY` or `YDC_API_KEY` | Direct You.com Search / Contents / Research fallback |
 | `LLM_PROVIDER` | `openai` (default) or `boundless` |
 | `OPENAI_API_KEY`, `CREWAI_MODEL` | Live CrewAI prose via OpenAI |
@@ -210,6 +211,8 @@ one --agent actions execute you <actionId> "$ONE_YOU_CONNECTION_KEY" -d '{"query
 ```
 
 Default You.com action IDs (overridable): Search Unified Web and News `conn_mod_def::GK9ryNdQKGE::TiwS_VVUSE-wxbKljY4T4g`, Research `conn_mod_def::GK9rx6bXINM::MUbK6JMcTwWoiaxT6DmEIQ`. Default Daytona create-sandbox action: `conn_mod_def::GMgWX_S6VPA::VxlhHfBWQ4qfa9mXEX2OQQ`. Start / list / delete resolve via `actions search` unless you set `ONE_DAYTONA_*_SANDBOX_ACTION_ID`.
+
+One’s create-sandbox schema requires `buildInfo.dockerfileContent`. Name-only tracer creates merge a default Dockerfile (`FROM daytonaio/sandbox:latest`) and an optional snapshot (`ubuntu-4vcpu-8ram-100gb`). Override with `ONE_DAYTONA_DOCKERFILE` / `ONE_DAYTONA_SNAPSHOT` (blank snapshot omits the field).
 
 `show-config` prints the **effective** `research_provider` (`one` / `you` / `mock`) and `sandbox_provider` (`one` / `daytona` / `none`) plus booleans — never `ONE_SECRET` or connection keys. `MOCK_MODE=true` (CI default) still uses the mock researcher.
 

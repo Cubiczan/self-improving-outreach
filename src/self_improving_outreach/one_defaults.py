@@ -3,3 +3,7 @@
 DEFAULT_YOU_SEARCH_ACTION_ID = "conn_mod_def::GK9ryNdQKGE::TiwS_VVUSE-wxbKljY4T4g"
 DEFAULT_YOU_RESEARCH_ACTION_ID = "conn_mod_def::GK9rx6bXINM::MUbK6JMcTwWoiaxT6DmEIQ"
 DEFAULT_DAYTONA_CREATE_SANDBOX_ACTION_ID = "conn_mod_def::GMgWX_S6VPA::VxlhHfBWQ4qfa9mXEX2OQQ"
+
+# One create-sandbox requires buildInfo.dockerfileContent. Snapshot is optional.
+DEFAULT_DAYTONA_DOCKERFILE = "FROM daytonaio/sandbox:latest"
+DEFAULT_DAYTONA_SNAPSHOT = "ubuntu-4vcpu-8ram-100gb"

@@ -73,6 +73,14 @@ def test_invalid_llm_provider_rejected():
         Settings(llm_provider="anthropic")
 
 
+def test_one_daytona_create_defaults_from_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ONE_DAYTONA_DOCKERFILE", "FROM ubuntu:22.04")
+    monkeypatch.setenv("ONE_DAYTONA_SNAPSHOT", "daytonaio/sandbox:latest")
+    settings = Settings(one_cli_auth=False)
+    assert settings.one_daytona_dockerfile == "FROM ubuntu:22.04"
+    assert settings.one_daytona_snapshot == "daytonaio/sandbox:latest"
+
+
 def test_invalid_research_and_sandbox_providers_rejected():
     with pytest.raises(ValidationError):
         Settings(research_provider="bing")

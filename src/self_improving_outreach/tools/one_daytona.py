@@ -4,13 +4,47 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from self_improving_outreach.one_defaults import (
+    DEFAULT_DAYTONA_CREATE_SANDBOX_ACTION_ID,
+    DEFAULT_DAYTONA_DOCKERFILE,
+    DEFAULT_DAYTONA_SNAPSHOT,
+)
 from self_improving_outreach.tools.one_cli import (
     DAYTONA_PLATFORM,
-    DEFAULT_DAYTONA_CREATE_SANDBOX_ACTION_ID,
     OneCli,
     OneError,
     unwrap_one_response,
 )
+
+
+def merge_sandbox_create_body(
+    data: Optional[dict[str, Any]] = None,
+    *,
+    dockerfile: Optional[str] = None,
+    snapshot: Optional[str] = None,
+) -> dict[str, Any]:
+    """Fill One/Daytona create fields so a name-only call validates.
+
+    One's create-sandbox action requires ``buildInfo.dockerfileContent``.
+    Daytona also accepts ``snapshot`` (e.g. ``ubuntu-4vcpu-8ram-100gb``).
+    Caller keys win. A blank snapshot omits the field.
+    """
+    body: dict[str, Any] = dict(data or {})
+    dockerfile_content = DEFAULT_DAYTONA_DOCKERFILE if dockerfile is None else str(dockerfile)
+    dockerfile_content = dockerfile_content.strip() or DEFAULT_DAYTONA_DOCKERFILE
+
+    existing_info = body.get("buildInfo")
+    build_info = dict(existing_info) if isinstance(existing_info, dict) else {}
+    if not str(build_info.get("dockerfileContent") or "").strip():
+        build_info["dockerfileContent"] = dockerfile_content
+    body["buildInfo"] = build_info
+
+    if "snapshot" not in body:
+        snapshot_value = DEFAULT_DAYTONA_SNAPSHOT if snapshot is None else str(snapshot)
+        snapshot_value = snapshot_value.strip()
+        if snapshot_value:
+            body["snapshot"] = snapshot_value
+    return body
 
 
 class OneSandbox:
@@ -45,6 +79,8 @@ class OneDaytonaClient:
         delete_action_id: Optional[str] = None,
         sandbox_path_var: str = "sandboxIdOrName",
         timeout: float = 90.0,
+        dockerfile: Optional[str] = None,
+        snapshot: Optional[str] = None,
     ) -> None:
         if not connection_key:
             raise OneError("ONE_DAYTONA_CONNECTION_KEY is required for One sandboxes")
@@ -55,6 +91,8 @@ class OneDaytonaClient:
         self.list_action_id = list_action_id
         self.delete_action_id = delete_action_id
         self.sandbox_path_var = sandbox_path_var
+        self.dockerfile = dockerfile
+        self.snapshot = snapshot
 
     def _execute(
         self,
@@ -78,11 +116,15 @@ class OneDaytonaClient:
         return self.runner.resolve_action_id(DAYTONA_PLATFORM, query, configured)
 
     def create(self, data: Optional[dict[str, Any]] = None) -> OneSandbox:
-        body = data if data is not None else {}
+        body = merge_sandbox_create_body(
+            data,
+            dockerfile=self.dockerfile,
+            snapshot=self.snapshot,
+        )
         payload = self._execute(
             self.create_action_id,
             data=body,
-            skip_validation=not body,
+            skip_validation=False,
         )
         sandbox_id = _sandbox_id(payload)
         if not sandbox_id:
@@ -145,4 +187,6 @@ def one_daytona_from_settings(settings: Any, *, runner: Optional[OneCli] = None)
         delete_action_id=settings.one_daytona_delete_sandbox_action_id,
         sandbox_path_var=settings.one_daytona_sandbox_path_var,
         timeout=settings.one_timeout_seconds,
+        dockerfile=settings.one_daytona_dockerfile,
+        snapshot=settings.one_daytona_snapshot,
     )

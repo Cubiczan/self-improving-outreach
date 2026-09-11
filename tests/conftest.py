@@ -19,6 +19,8 @@ def _mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ONE_DAYTONA_CONNECTION_KEY", raising=False)
     monkeypatch.delenv("RESEARCH_PROVIDER", raising=False)
     monkeypatch.delenv("SANDBOX_PROVIDER", raising=False)
+    monkeypatch.delenv("ONE_DAYTONA_DOCKERFILE", raising=False)
+    monkeypatch.delenv("ONE_DAYTONA_SNAPSHOT", raising=False)
     monkeypatch.setenv("ONE_CLI_AUTH", "false")
     monkeypatch.delenv("BOUNDLESS_API_KEY", raising=False)
     monkeypatch.delenv("BOUNDLESS_BASE_URL", raising=False)
