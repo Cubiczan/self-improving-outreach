@@ -198,23 +198,24 @@ daytona = Daytona(config)
 
 ## Boundless (burn credits on `swarm --once`)
 
-Sam's credit is on **boundless.network**. This repo defaults `BOUNDLESS_BASE_URL` to BoundlessAPI (`https://api.boundlessapi.com/v1`). If the dashboard that issued the key shows a different OpenAI-compatible URL, override it.
+Sam's credit is on **boundless.network** inference. Console: https://inference.boundless.network/
 
-| Credit source | `BOUNDLESS_BASE_URL` | Typical `BOUNDLESS_MODEL` |
-| --- | --- | --- |
-| BoundlessAPI catalog (default) | `https://api.boundlessapi.com/v1` | `gpt-4o-mini` (or a live catalog id such as `gpt-5.4-mini`) |
-| boundless.network inference | `https://api.inference.boundless.network/v1` | `glm-5.2` |
+| | |
+| --- | --- |
+| Base URL | `https://api.inference.boundless.network/v1` |
+| Auth | `Authorization: Bearer $BOUNDLESS_API_KEY` |
+| Default CrewAI model | `glm-5.2` |
+| Other models | `dsv4`, `qwen3.6`, `nemotron3-super`, `kimi-k3` |
+
+Do **not** use `api.boundlessapi.com`.
 
 ```bash
 # .env — never commit this file
 MOCK_MODE=false
 LLM_PROVIDER=boundless
 BOUNDLESS_API_KEY=          # paste locally only
-BOUNDLESS_BASE_URL=https://api.boundlessapi.com/v1
-# If Sam's dashboard is boundless.network inference instead:
-# BOUNDLESS_BASE_URL=https://api.inference.boundless.network/v1
-# BOUNDLESS_MODEL=glm-5.2
-BOUNDLESS_MODEL=gpt-4o-mini
+BOUNDLESS_BASE_URL=https://api.inference.boundless.network/v1
+BOUNDLESS_MODEL=glm-5.2
 # YOU_API_KEY=              # optional; without it, research stays mocked
 ```
 
@@ -224,7 +225,7 @@ uv run python -m self_improving_outreach show-config   # booleans only; no secre
 uv run python -m self_improving_outreach swarm --once --concurrency 2
 ```
 
-`LLM_PROVIDER=boundless` points CrewAI / LiteLLM at Boundless (`base_url` + key, also copied to `OPENAI_API_KEY` / `OPENAI_BASE_URL`). If `LLM_PROVIDER=openai` but only `BOUNDLESS_API_KEY` is set, Boundless is the fallback. Each live crew runs several LLM tasks — this **does** spend Boundless credit. Keep `MOCK_MODE=true` (the default) for CI and laptop demos.
+`LLM_PROVIDER=boundless` points CrewAI / LiteLLM at that `base_url` with Bearer auth (key also copied to `OPENAI_API_KEY` / `OPENAI_BASE_URL`). If `LLM_PROVIDER=openai` but only `BOUNDLESS_API_KEY` is set, Boundless is the fallback. Each live crew runs several LLM tasks — this **does** spend Boundless credit. Keep `MOCK_MODE=true` (the default) for CI and laptop demos.
 
 ## LiveKit learner loop
 

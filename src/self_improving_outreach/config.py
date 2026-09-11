@@ -8,10 +8,9 @@ from typing import Any, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_BOUNDLESS_BASE_URL = "https://api.boundlessapi.com/v1"
-DEFAULT_BOUNDLESS_MODEL = "gpt-4o-mini"
-BOUNDLESS_NETWORK_BASE_URL = "https://api.inference.boundless.network/v1"
-BOUNDLESS_NETWORK_MODEL = "glm-5.2"
+# Sam's credit: https://inference.boundless.network/ — do not use api.boundlessapi.com
+DEFAULT_BOUNDLESS_BASE_URL = "https://api.inference.boundless.network/v1"
+DEFAULT_BOUNDLESS_MODEL = "glm-5.2"
 LLM_PROVIDERS = ("openai", "boundless")
 
 

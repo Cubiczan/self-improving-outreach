@@ -21,7 +21,9 @@ def apply_llm_runtime_env(settings: Settings) -> None:
     """Point OpenAI-compatible clients (CrewAI / LiteLLM) at the effective provider.
 
     When Boundless is selected, copies the Boundless key into ``OPENAI_API_KEY``
-    and sets ``OPENAI_BASE_URL`` / ``OPENAI_API_BASE``. Never logs secret values.
+    and sets ``OPENAI_BASE_URL`` / ``OPENAI_API_BASE`` so clients send
+    ``Authorization: Bearer`` to ``https://api.inference.boundless.network/v1``.
+    Never logs secret values.
     """
     if settings.effective_llm_provider != PROVIDER_BOUNDLESS:
         return

@@ -6,7 +6,7 @@ Sam has Boundless inference credit (~$50 on boundless.network). Live CrewAI toda
 
 ## What
 
-- OpenAI-compatible Boundless provider (`LLM_PROVIDER=boundless`) for CrewAI / LiteLLM
+- OpenAI-compatible Boundless provider (`LLM_PROVIDER=boundless`) for CrewAI / LiteLLM against `https://api.inference.boundless.network/v1` (default model `glm-5.2`)
 - Settings + `show-config` (no secrets) + `.env.example` / README
 - LiveKit transcript parse (`voice --transcript-file`) and optional post-draft auto hook (`LIVEKIT_FEEDBACK_AUTO`)
 - Persist voice learn events with `source=livekit`; mock mode stays key-free

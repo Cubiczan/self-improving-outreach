@@ -2,20 +2,20 @@
 
 ## Purpose
 
-Let live CrewAI drafts call an OpenAI-compatible endpoint. Default is OpenAI. Boundless is first-class so Cubiczan can spend BoundlessAPI or boundless.network inference credits without rewriting crews.
+Let live CrewAI drafts call an OpenAI-compatible endpoint. Default is OpenAI. Boundless is first-class so Cubiczan can spend boundless.network inference credits (https://inference.boundless.network/) without rewriting crews.
 
 ## Requirements
 
 ### Requirement: Provider selection
 
-The system SHALL read `LLM_PROVIDER=openai|boundless` (default `openai`). When the provider is `boundless`, CrewAI/LiteLLM SHALL use `BOUNDLESS_API_KEY` and `BOUNDLESS_BASE_URL`. When the provider is `openai` and `OPENAI_API_KEY` is missing but `BOUNDLESS_API_KEY` is set, the system SHALL fall back to Boundless.
+The system SHALL read `LLM_PROVIDER=boundless|openai` (default `openai`). When the provider is `boundless`, CrewAI/LiteLLM SHALL use `BOUNDLESS_API_KEY` and `BOUNDLESS_BASE_URL` (`https://api.inference.boundless.network/v1`) with `Authorization: Bearer`. When the provider is `openai` and `OPENAI_API_KEY` is missing but `BOUNDLESS_API_KEY` is set, the system SHALL fall back to Boundless. Do not use `api.boundlessapi.com`.
 
 #### Scenario: Explicit Boundless provider
 
 - GIVEN `LLM_PROVIDER=boundless` and `BOUNDLESS_API_KEY` and `MOCK_MODE=false`
 - WHEN Settings are loaded
 - THEN `use_crewai` is true
-- AND `llm_base_url` is `BOUNDLESS_BASE_URL` (default `https://api.boundlessapi.com/v1`)
+- AND `llm_base_url` is `BOUNDLESS_BASE_URL` (default `https://api.inference.boundless.network/v1`)
 - AND `llm_api_key` is the Boundless key, not a raw secret printed by `show-config`
 
 #### Scenario: OpenAI falls back to Boundless
@@ -37,8 +37,8 @@ When the effective provider is Boundless, the adapter SHALL configure CrewAI `LL
 #### Scenario: Boundless model id
 
 - GIVEN `BOUNDLESS_MODEL` unset
-- THEN the default model is a mid-tier OpenAI-compatible id (`gpt-4o-mini`)
-- AND operators MAY override to a BoundlessAPI catalog id or a boundless.network id such as `glm-5.2`
+- THEN the default CrewAI model is `glm-5.2`
+- AND operators MAY override to other catalog ids (`dsv4`, `qwen3.6`, `nemotron3-super`, `kimi-k3`)
 
 ### Requirement: Secret-free config display
 

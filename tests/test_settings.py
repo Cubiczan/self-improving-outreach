@@ -23,8 +23,10 @@ def test_boundless_provider_enables_crewai_when_not_mock():
     assert settings.use_crewai is True
     assert settings.llm_base_url == DEFAULT_BOUNDLESS_BASE_URL
     assert settings.llm_api_key == "bai-test"
-    assert settings.llm_model == "gpt-4o-mini"
-    assert crewai_model_name(settings) == "openai/gpt-4o-mini"
+    assert settings.llm_model == "glm-5.2"
+    assert settings.llm_base_url == "https://api.inference.boundless.network/v1"
+    assert "boundlessapi.com" not in settings.llm_base_url
+    assert crewai_model_name(settings) == "openai/glm-5.2"
 
 
 def test_openai_falls_back_to_boundless_when_only_boundless_key():
@@ -51,13 +53,13 @@ def test_explicit_boundless_overrides_openai_key():
         llm_provider="boundless",
         openai_api_key="sk-oai",
         boundless_api_key="bai-test",
-        boundless_base_url="https://api.inference.boundless.network/v1",
-        boundless_model="glm-5.2",
+        boundless_model="dsv4",
     )
     assert settings.effective_llm_provider == "boundless"
     assert settings.llm_api_key == "bai-test"
-    assert settings.llm_model == "glm-5.2"
-    assert settings.llm_base_url == "https://api.inference.boundless.network/v1"
+    assert settings.llm_model == "dsv4"
+    assert settings.llm_base_url == DEFAULT_BOUNDLESS_BASE_URL
+    assert DEFAULT_BOUNDLESS_BASE_URL == "https://api.inference.boundless.network/v1"
 
 
 def test_mock_mode_ignores_boundless_key():
