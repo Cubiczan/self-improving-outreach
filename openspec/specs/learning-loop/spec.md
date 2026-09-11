@@ -36,3 +36,26 @@ Drafter SHALL load current `message_patterns` ordered by score and SHALL prefer 
 ### Requirement: Persistence fallback
 
 If ClickHouse is unavailable, the system SHALL keep the same learning semantics in an in-memory (or local JSON queue) store so mock mode still learns.
+
+### Requirement: LiveKit / voice preference interviews
+
+Marketing Hunter or an AE MAY run a preference interview (LiveKit or a saved transcript) and feed the Learner. Pipeline Scout still owns LinkedIn send. Voice ingest SHALL work in mock mode without LiveKit keys.
+
+#### Scenario: CLI transcript file
+
+- GIVEN a lead and a JSON transcript with positive/negative, notes, and optional `pattern_id`
+- WHEN `python -m self_improving_outreach voice --lead-id <id> --transcript-file path.json`
+- THEN the Learner applies thumbs up/down
+- AND an `outreach_event` is stored with `metadata.source=livekit`
+
+#### Scenario: Post-draft auto hook
+
+- GIVEN `LIVEKIT_FEEDBACK_AUTO=true` and `LIVEKIT_TRANSCRIPT_PATH` pointing at a file or a directory of `{lead_id}.json`
+- WHEN the pipeline draft succeeds
+- THEN the system parses that transcript and calls `record_voice_feedback`
+
+#### Scenario: Mock voice without LiveKit
+
+- GIVEN no `LIVEKIT_API_KEY`
+- WHEN `voice --lead-id --positive` or `--transcript-file` is used
+- THEN feedback is recorded without starting a LiveKit session

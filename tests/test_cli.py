@@ -11,6 +11,9 @@ def test_cli_show_config_is_mock():
     assert result.exit_code == 0
     assert "Cubiczan" in result.stdout
     assert "true" in result.stdout.lower() or "True" in result.stdout
+    assert "llm_provider" in result.stdout
+    assert "boundless_configured" in result.stdout
+    assert "livekit_feedback_auto" in result.stdout
 
 
 def test_cli_run_one_lead():

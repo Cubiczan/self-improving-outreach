@@ -172,6 +172,21 @@ class OutreachPipeline:
                     )
                     learned = True
 
+                if self.settings.livekit_feedback_auto:
+                    from self_improving_outreach.voice.livekit_agent import (
+                        maybe_apply_auto_voice_feedback,
+                    )
+
+                    with tracer.span("voice.feedback"):
+                        if maybe_apply_auto_voice_feedback(
+                            self.settings,
+                            self.store,
+                            lead,
+                            run_id=run.run_id,
+                            pattern_id=draft.pattern_id,
+                        ):
+                            learned = True
+
             run.status = "succeeded"
             run.finished_at = utcnow()
             run.traces = tracer.records()
