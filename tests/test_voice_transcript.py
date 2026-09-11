@@ -129,7 +129,7 @@ def test_pipeline_skips_auto_voice_when_flag_false(tmp_path: Path):
     assert not [event for event in store.events if event.metadata.get("source") == "livekit"]
 
 
-def test_auto_voice_without_transcript_does_not_fail_when_livekit_configured():
+def test_auto_voice_without_transcript_runs_stub_when_livekit_configured():
     lead = _cfo_lead()
     settings = Settings(
         mock_mode=True,
@@ -145,8 +145,28 @@ def test_auto_voice_without_transcript_does_not_fail_when_livekit_configured():
     you = ResilientYouCom(MockYouComClient(), store, tracer)
     result = OutreachPipeline(settings, store, you, tracer).run(lead)
     assert result.ok
-    assert result.learned is False
+    assert result.learned is True
     assert result.error is None
+    voice_events = [event for event in store.events if event.metadata.get("source") == "livekit"]
+    assert voice_events
+    assert voice_events[0].metadata["stub"] is True
+    assert voice_events[0].metadata["auto"] is True
+
+
+def test_auto_voice_without_transcript_or_livekit_is_noop():
+    lead = _cfo_lead()
+    settings = Settings(
+        mock_mode=True,
+        simulate_outcomes=False,
+        livekit_feedback_auto=True,
+        livekit_transcript_path=None,
+    )
+    store = MemoryStore()
+    tracer = LoggingTracer()
+    you = ResilientYouCom(MockYouComClient(), store, tracer)
+    result = OutreachPipeline(settings, store, you, tracer).run(lead)
+    assert result.ok
+    assert result.learned is False
 
 
 def test_pipeline_auto_hook_reads_transcript(tmp_path: Path):

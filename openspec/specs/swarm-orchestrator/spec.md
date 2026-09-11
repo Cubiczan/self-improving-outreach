@@ -58,7 +58,7 @@ After a batch logs outcomes, the next batch SHALL read updated ICP weights and m
 
 ### Requirement: Queue reclaim
 
-The system SHALL provide a CLI (`requeue` and `queue reset`) that sets matching leads to `queued` so the swarm can claim them again. Selectors SHALL include `lead_id`, company (case-insensitive substring), `--all-sample` (the committed sample ICP queue), and optional `--clear-processing` for stuck `processing` rows. The committed sample JSON file SHALL NOT be overwritten.
+The system SHALL provide a CLI (`requeue` and `queue reset`) that sets matching leads to `queued` so the swarm can claim them again. Selectors SHALL include `lead_id`, company (case-insensitive substring), `--all-sample` (the committed sample ICP queue), `--clear-processing` for stuck `processing` rows, and `--status processing|failed|done` (`done` means drafted / pending_review / approved_for_scout / learned). `swarm --requeue` SHALL reclaim `processing` and `failed` before claiming. The committed sample JSON file SHALL NOT be overwritten.
 
 #### Scenario: Requeue by lead id
 
@@ -77,6 +77,23 @@ The system SHALL provide a CLI (`requeue` and `queue reset`) that sets matching 
 - GIVEN a lead in `processing`
 - WHEN `requeue --clear-processing` runs
 - THEN that lead's status is `queued`
+
+#### Scenario: Requeue by status and swarm reclaim
+
+- GIVEN leads in `failed` or `approved_for_scout`
+- WHEN `requeue --status failed` or `requeue --status done` runs
+- THEN those leads have status `queued`
+- AND `swarm --requeue --once` requeues `processing` and `failed` before claiming
+
+### Requirement: ClickUp list poll
+
+`clickup-sync` SHALL poll `CLICKUP_LIST_ID` (default Sales Leads `901716996906`) using `CLICKUP_API_TOKEN` and map tasks in `CLICKUP_QUEUE_STATUS` (default Queued) through the existing ClickUp mapper. Re-poll SHALL NOT reset an in-flight status. Tests SHALL use a mock client.
+
+#### Scenario: Poll without token
+
+- GIVEN no `CLICKUP_API_TOKEN`
+- WHEN `clickup-sync` runs
+- THEN the CLI exits 0 without calling ClickUp HTTP
 
 ### Requirement: ClickUp queue ingest
 

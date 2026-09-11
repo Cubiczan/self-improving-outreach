@@ -32,7 +32,11 @@ def _mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LIVEKIT_FEEDBACK_AUTO", raising=False)
     monkeypatch.delenv("LIVEKIT_TRANSCRIPT_PATH", raising=False)
     monkeypatch.delenv("LEARN_ON_DRAFT", raising=False)
+    monkeypatch.delenv("MOCK_LEARN_OUTCOMES", raising=False)
     monkeypatch.delenv("SIMULATE_OUTCOMES", raising=False)
+    monkeypatch.delenv("CLICKUP_API_TOKEN", raising=False)
+    monkeypatch.delenv("CLICKUP_LIST_ID", raising=False)
+    monkeypatch.delenv("CLICKUP_QUEUE_STATUS", raising=False)
     reset_settings_cache()
     yield
     reset_settings_cache()

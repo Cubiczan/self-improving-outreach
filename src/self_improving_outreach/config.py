@@ -91,7 +91,12 @@ class Settings(BaseSettings):
     swarm_interval_seconds: int = 300
     simulate_outcomes: bool = True
     learn_on_draft: bool = False
+    mock_learn_outcomes: bool = False
     pending_approvals_path: str = "pending_approvals.jsonl"
+
+    clickup_api_token: Optional[str] = None
+    clickup_list_id: str = "901716996906"
+    clickup_queue_status: str = "Queued"
 
     @field_validator("llm_provider")
     @classmethod
@@ -229,9 +234,13 @@ class Settings(BaseSettings):
     @property
     def should_learn_on_draft(self) -> bool:
         """Draft→Learner is opt-in for live; mock + SIMULATE_OUTCOMES still demos it."""
-        if self.learn_on_draft:
+        if self.learn_on_draft or self.mock_learn_outcomes:
             return True
         return bool(self.simulate_outcomes and self.is_mock)
+
+    @property
+    def clickup_configured(self) -> bool:
+        return bool(self.clickup_api_token)
 
 
 def public_settings_view(settings: Settings) -> dict[str, Any]:
@@ -259,8 +268,10 @@ def public_settings_view(settings: Settings) -> dict[str, Any]:
         "livekit_configured": bool(settings.livekit_api_key),
         "livekit_feedback_auto": settings.livekit_feedback_auto,
         "simulate_outcomes": settings.simulate_outcomes,
-        "learn_on_draft": settings.learn_on_draft,
+        "learn_on_draft": settings.learn_on_draft or settings.mock_learn_outcomes,
         "should_learn_on_draft": settings.should_learn_on_draft,
+        "clickup_configured": settings.clickup_configured,
+        "clickup_list_id": settings.clickup_list_id,
         "crewai": settings.use_crewai,
         "sample_queue": str(sample_queue_path()),
     }

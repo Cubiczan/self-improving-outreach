@@ -1,6 +1,7 @@
 from self_improving_outreach.voice.livekit_agent import (
     build_agent_server,
     describe_status,
+    enqueue_preference_interview_stub,
     livekit_available,
     livekit_configured,
     maybe_apply_auto_voice_feedback,
@@ -17,6 +18,7 @@ __all__ = [
     "VoiceTranscriptFeedback",
     "build_agent_server",
     "describe_status",
+    "enqueue_preference_interview_stub",
     "livekit_available",
     "livekit_configured",
     "maybe_apply_auto_voice_feedback",
