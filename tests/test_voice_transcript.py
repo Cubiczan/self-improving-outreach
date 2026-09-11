@@ -107,6 +107,48 @@ def test_record_voice_feedback_persists_livekit_source():
     assert events[0].pattern_id == "mw-90d"
 
 
+def test_pipeline_skips_auto_voice_when_flag_false(tmp_path: Path):
+    lead = _cfo_lead()
+    transcript = tmp_path / f"{lead.lead_id}.json"
+    transcript.write_text(
+        json.dumps({"lead_id": lead.lead_id, "positive": True, "notes": "should not apply"}),
+        encoding="utf-8",
+    )
+    settings = Settings(
+        mock_mode=True,
+        simulate_outcomes=False,
+        livekit_feedback_auto=False,
+        livekit_transcript_path=str(tmp_path),
+    )
+    store = MemoryStore()
+    tracer = LoggingTracer()
+    you = ResilientYouCom(MockYouComClient(), store, tracer)
+    result = OutreachPipeline(settings, store, you, tracer).run(lead)
+    assert result.ok
+    assert result.learned is False
+    assert not [event for event in store.events if event.metadata.get("source") == "livekit"]
+
+
+def test_auto_voice_without_transcript_does_not_fail_when_livekit_configured():
+    lead = _cfo_lead()
+    settings = Settings(
+        mock_mode=True,
+        simulate_outcomes=False,
+        livekit_feedback_auto=True,
+        livekit_api_key="lk-test",
+        livekit_api_secret="lk-secret",
+        livekit_url="wss://example.livekit.cloud",
+        livekit_transcript_path=None,
+    )
+    store = MemoryStore()
+    tracer = LoggingTracer()
+    you = ResilientYouCom(MockYouComClient(), store, tracer)
+    result = OutreachPipeline(settings, store, you, tracer).run(lead)
+    assert result.ok
+    assert result.learned is False
+    assert result.error is None
+
+
 def test_pipeline_auto_hook_reads_transcript(tmp_path: Path):
     lead = _cfo_lead()
     transcript = tmp_path / f"{lead.lead_id}.json"

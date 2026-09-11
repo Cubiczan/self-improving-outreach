@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     swarm_concurrency: int = 5
     swarm_interval_seconds: int = 300
     simulate_outcomes: bool = True
+    learn_on_draft: bool = False
     pending_approvals_path: str = "pending_approvals.jsonl"
 
     @field_validator("llm_provider")
@@ -225,6 +226,13 @@ class Settings(BaseSettings):
     def use_crewai(self) -> bool:
         return (not self.is_mock) and self.has_llm_credentials
 
+    @property
+    def should_learn_on_draft(self) -> bool:
+        """Draft→Learner is opt-in for live; mock + SIMULATE_OUTCOMES still demos it."""
+        if self.learn_on_draft:
+            return True
+        return bool(self.simulate_outcomes and self.is_mock)
+
 
 def public_settings_view(settings: Settings) -> dict[str, Any]:
     """Non-secret configuration for CLI / diagnostics. Never includes key material."""
@@ -250,6 +258,9 @@ def public_settings_view(settings: Settings) -> dict[str, Any]:
         "daytona_sandbox_runs": settings.daytona_sandbox_runs,
         "livekit_configured": bool(settings.livekit_api_key),
         "livekit_feedback_auto": settings.livekit_feedback_auto,
+        "simulate_outcomes": settings.simulate_outcomes,
+        "learn_on_draft": settings.learn_on_draft,
+        "should_learn_on_draft": settings.should_learn_on_draft,
         "crewai": settings.use_crewai,
         "sample_queue": str(sample_queue_path()),
     }

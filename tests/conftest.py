@@ -31,6 +31,8 @@ def _mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LIVEKIT_URL", raising=False)
     monkeypatch.delenv("LIVEKIT_FEEDBACK_AUTO", raising=False)
     monkeypatch.delenv("LIVEKIT_TRANSCRIPT_PATH", raising=False)
+    monkeypatch.delenv("LEARN_ON_DRAFT", raising=False)
+    monkeypatch.delenv("SIMULATE_OUTCOMES", raising=False)
     reset_settings_cache()
     yield
     reset_settings_cache()

@@ -1,0 +1,19 @@
+{
+  "event": "taskStatusUpdated",
+  "task_id": "86abcqueued",
+  "task": {
+    "id": "86abcqueued",
+    "name": "Northline Manufacturing — Priya Shah",
+    "status": {"status": "Queued", "type": "custom"},
+    "url": "https://app.clickup.com/t/86abcqueued",
+    "description": "CFO lead from Pipeline Scout. Cubiczan search + outreach only.",
+    "custom_fields": [
+      {"name": "Company", "value": "Northline Manufacturing"},
+      {"name": "Contact", "value": "Priya Shah"},
+      {"name": "Title", "value": "CFO"},
+      {"name": "Industry", "value": "manufacturing"},
+      {"name": "Domain", "value": "northline.example"},
+      {"name": "Pain", "value": "SOX 404 material weakness"}
+    ]
+  }
+}

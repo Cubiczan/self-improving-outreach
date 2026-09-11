@@ -95,7 +95,7 @@ A tool failure in **one** worker switches that worker to the failover path. Othe
 3. **Drafter** — Picks the highest-scoring Cubiczan angle from `message_patterns`.
 4. **Critic** — Brand spelling, overclaims, length. Does not send.
 5. **Human-gate stub** — `HUMAN_GATE_ENABLED=true` writes `pending_approvals.jsonl`; otherwise `approved_for_scout`.
-6. **Learner** — Explicit outcomes (`thumbs_up` / `thumbs_down` / `replied` / `meeting` / `ignore` / `sent`) update weights and pattern win rates. Mock swarm can simulate outcomes so the next batch prefers winning angles.
+6. **Learner** — Explicit outcomes (`thumbs_up` / `thumbs_down` / `replied` / `meeting` / `ignore` / `sent`) update weights and pattern win rates. Mock swarm (`SIMULATE_OUTCOMES=true`) simulates outcomes so the next batch prefers winning angles. Live production waits for Scout `learn` events unless `LEARN_ON_DRAFT=true` (demo/CI opt-in).
 7. **Voice (optional)** — LiveKit Agents preference interview writes the same Learner path. Core text crew does not require LiveKit.
 
 CrewAI is used when `crewai` is installed and an LLM key is present (`OPENAI_API_KEY`, or Boundless via `LLM_PROVIDER=boundless` / Boundless fallback). Otherwise a deterministic mock crew runs the same stages (CI and laptop demos).
@@ -117,11 +117,35 @@ Continuous swarm (claims the queue, sleeps, repeats):
 uv run python -m self_improving_outreach swarm --concurrency 5 --loop --interval 300
 ```
 
-Learn from a real outcome after Pipeline Scout reports back:
+Learn from a real Scout outcome (`thumbs_up`, `thumbs_down`, `replied`, `meeting`, `ignore`, `sent`):
 
 ```bash
 uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"meeting","pattern_id":"mw-90d"}'
+uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"thumbs_up","pattern_id":"mw-90d"}'
+uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"replied"}'
 ```
+
+Reclaim leads so the swarm can claim them again (`queued`). Use after a demo run, or to unstick `processing`:
+
+```bash
+uv run python -m self_improving_outreach requeue --lead-id 11111111-1111-1111-1111-111111111111
+uv run python -m self_improving_outreach requeue --company "Northline"
+uv run python -m self_improving_outreach requeue --all-sample
+uv run python -m self_improving_outreach requeue --clear-processing
+uv run python -m self_improving_outreach queue reset --all-sample   # alias
+```
+
+`--queue path.json` persists a work queue. The committed `data/leads.sample.json` file is never overwritten.
+
+Ingest a ClickUp **Queued** task (or webhook envelope with a `task` object) into the same queue. Pipeline Scout / Marketing Hunter can call this when status=Queued. Search + outreach only — no Google Ads, Facebook Ads, or Meta Ads.
+
+```bash
+uv run python -m self_improving_outreach ingest-clickup --file data/clickup_task.sample.json
+uv run python -m self_improving_outreach ingest-clickup --json '{"id":"abc","name":"Acme — Jane","status":{"status":"Queued"}}'
+uv run python -m self_improving_outreach queue upsert --from-json '{"company":"Acme","contact_name":"Jane","title":"CFO"}'
+```
+
+Non-Queued ClickUp tasks are skipped unless you pass `--force`.
 
 ## API keys locally
 
@@ -142,8 +166,9 @@ uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-111
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_PORT`, `CLICKHOUSE_SECURE` | ClickHouse Cloud or local |
 | `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona SDK + OTEL traces (fallback when One Daytona is unset) |
 | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Optional live voice room (not required for transcript ingest) |
-| `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Post-draft Learner hook from a JSON transcript |
+| `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Optional post-draft transcript→Learner hook (default `false`; no LiveKit keys required) |
 | `MOCK_MODE`, `HUMAN_GATE_ENABLED`, `SIMULATE_OUTCOMES` | Runtime behavior |
+| `LEARN_ON_DRAFT` | Opt-in draft-time `simulate_outcome` / `apply_learn_event` on the live path (default `false`) |
 
 Never commit `.env`. The CLI `show-config` prints booleans only — not secret values.
 
@@ -292,7 +317,7 @@ Transcript JSON (any of `positive`, `sentiment`, `outcome`, `thumbs` for polarit
 }
 ```
 
-After a successful pipeline draft, set `LIVEKIT_FEEDBACK_AUTO=true` and `LIVEKIT_TRANSCRIPT_PATH` to a file or a directory of `{lead_id}.json` files. The hook calls `record_voice_feedback` and writes an `outreach_event` with `metadata.source=livekit`.
+After a successful pipeline draft, set `LIVEKIT_FEEDBACK_AUTO=true` (default **false**) and `LIVEKIT_TRANSCRIPT_PATH` to a file or a directory of `{lead_id}.json` files. The hook calls `record_voice_feedback` and writes an `outreach_event` with `metadata.source=livekit`. LiveKit URL/keys are only needed for a live room — the core text path never requires them. If the flag is on and LiveKit is configured but no transcript file exists, the draft still succeeds and the hook no-ops.
 
 ```bash
 uv sync --extra livekit
@@ -310,6 +335,7 @@ Without LiveKit keys the command stays idle for rooms and still records mock / f
 | `sent` | Small positive (Pipeline Scout actually sent) |
 | You.com exception | `tool_failures` row; second failure degrades to cache; swarm continues |
 | Voice thumbs / transcript | Same as explicit thumbs via Learner; `outreach_events.metadata.source=livekit` |
+| `LEARN_ON_DRAFT=true` (or mock + `SIMULATE_OUTCOMES`) | After draft, `simulate_outcome` updates weights/patterns so `learned` is true |
 
 Drafter always reads **current** `message_patterns` ordered by score, so the next swarm batch prefers angles that worked.
 
@@ -320,6 +346,7 @@ src/self_improving_outreach/   # CLI, crews, swarm, stores, tools, voice, llm pr
 migrations/clickhouse/         # DDL
 data/leads.sample.json         # 3 mock ICP leads
 data/voice_transcript.sample.json
+data/clickup_task.sample.json  # ClickUp webhook → queued lead
 openspec/specs/                # living behavior specs
 ```
 
