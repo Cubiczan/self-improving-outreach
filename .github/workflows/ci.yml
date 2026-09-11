@@ -1,0 +1,20 @@
+# GitHub Actions — add repository secrets with the same names as `.env.example`.
+# CI itself does not need secrets: tests run in mock mode.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MOCK_MODE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Run unit tests
+        run: uv sync --group dev && uv run pytest
