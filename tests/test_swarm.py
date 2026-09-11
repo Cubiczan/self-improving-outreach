@@ -79,8 +79,21 @@ def test_critic_rewrites_brand_misspelling():
         channel=Channel.LINKEDIN,
     )
     critique = critique_draft(draft)
+    assert "brand misspelling" in critique.issues
     assert "CubicZan" not in (critique.revised_body or "")
     assert "Cubiczan" in (critique.revised_body or "")
+
+
+def test_critic_does_not_flag_correct_cubiczan():
+    draft = Draft(
+        pattern_id="mw-90d",
+        angle="90-day material-weakness remediation",
+        body="Hi there from Cubiczan — we help with governed close.",
+        channel=Channel.LINKEDIN,
+    )
+    critique = critique_draft(draft)
+    assert "brand misspelling" not in critique.issues
+    assert critique.accepted is True
 
 
 def test_human_gate_stub_holds_draft(tmp_path: Path):

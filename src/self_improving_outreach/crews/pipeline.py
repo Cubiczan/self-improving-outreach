@@ -57,10 +57,9 @@ def draft_message(lead: Lead, store: OutreachStore, channel: Channel) -> Draft:
 def critique_draft(draft: Draft) -> Critique:
     issues: list[str] = []
     body = draft.body
-    for misspelling in brand.BRAND_MISSPELLINGS:
-        if misspelling.lower() in body.lower() and brand.BRAND not in body:
-            issues.append("brand misspelling")
-        body = body.replace(misspelling, brand.BRAND)
+    if brand.has_brand_misspelling(body):
+        issues.append("brand misspelling")
+        body = brand.rewrite_brand_spelling(body)
     if brand.BRAND not in body:
         issues.append("missing Cubiczan brand")
         body = f"{body}\n\n— {brand.FOUNDER}, {brand.BRAND}"

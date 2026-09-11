@@ -113,22 +113,15 @@ def migrate(
         help="ClickHouse DDL file",
     ),
 ) -> None:
-    """Apply ClickHouse schema. No-op message when CH is not configured."""
+    """Apply ClickHouse schema. Creates the database if it is missing."""
     settings = get_settings()
     if not settings.clickhouse_host:
         console.print("ClickHouse not configured; using in-memory store. Skip migrate.")
         raise typer.Exit(0)
-    from self_improving_outreach.stores.clickhouse import ClickHouseStore
+    from self_improving_outreach.stores.clickhouse import apply_clickhouse_migration
 
-    store = ClickHouseStore.from_settings(settings)
-    statements = [
-        chunk.strip()
-        for chunk in sql_path.read_text(encoding="utf-8").split(";")
-        if chunk.strip() and not chunk.strip().startswith("--")
-    ]
-    for statement in statements:
-        store._client.command(statement)
-    console.print(f"Applied {len(statements)} statements to {settings.clickhouse_database}")
+    applied = apply_clickhouse_migration(settings, sql_path)
+    console.print(f"Applied {applied} statements to {settings.clickhouse_database}")
 
 
 @app.command()
