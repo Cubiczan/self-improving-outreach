@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Run Self Improving Outreach — a Cubiczan-branded closed loop for **any outbound sales**. CrewAI MAY draft prose inside each swarm worker. Deterministic Python owns ICP Score math, Learner updates, the code brand critic, and send-hold for Pipeline Scout.
+Run Self Improving Outreach — a Cubiczan-branded closed loop for **any outbound sales** (not CFO/CIO-only). CrewAI MAY draft prose inside each swarm worker. Deterministic Python owns ICP Score math, Learner updates, the code brand critic, and send-hold for Pipeline Scout.
 
 ## ADDED Requirements
 

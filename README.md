@@ -329,7 +329,7 @@ CrewAI utilization is **inside each swarm worker**, not a replacement for the cl
 | `draft` | Compat: Researcher → Interpreter Scorer → Drafter → Critic, body only, no tools |
 | `full` (default when `use_crewai`) | You.com tool on Researcher (and Strategist), plus Strategist + Adversary Critic |
 
-Full-mode agents are framed for **general outbound**. Stored `message_patterns` / ICP features in this repo are examples. The CrewAI Adversary Critic hardens prose (weak claims, compliance/send risk, overclaims) and MAY attach notes as extras on the CHP structural adversary report. It does **not** seal R0, skip the structural adversary, lock, or promote to `approved_for_scout`. An optional external `consensus-hardening-protocol` package may mention a general-domain scoring floor; that import is unrelated to the in-repo CHP lock and is not a dependency.
+Full-mode agents are framed for **general outbound**, not CFO/CIO-only finance copy. Stored `message_patterns` / ICP features in this repo are examples. The CrewAI Adversary Critic hardens prose (weak claims, compliance/send risk, overclaims) and MAY attach notes as extras on the CHP structural adversary report. It does **not** seal R0, skip the structural adversary, lock, or promote to `approved_for_scout`. An optional external `consensus-hardening-protocol` package may mention a general-domain scoring floor; that import is unrelated to the in-repo CHP lock and is not a dependency.
 
 Tracer events: `crewai.mode`, `crewai.tools` (attached names + call count), `crewai.fallback`.
 
