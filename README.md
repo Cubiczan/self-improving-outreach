@@ -1,34 +1,104 @@
-# Cubiczan self-improving outreach
+# Self Improving Outreach
 
-Production scaffold for Cubiczan sales outreach and pipeline agents. Crews **draft and learn**. They do **not** send LinkedIn or email — **Marketing Hunter / Pipeline Scout** own send.
+A closed-loop system for **any outbound sales / outreach** — not a finance-only or CFO/CIO product. Research a lead, score it against *your* ICP weights, draft a message, then **learn** from what happened so the next draft is better.
 
-Brand is **Cubiczan** (never CubicZan). Founder: Sam / Shyam Desigan. Positioning: agentic CFO/CIO, governed multi-agent finance (close, reconciliation, treasury, observability), 90-day material-weakness remediation.
+The repo ships **example** ICP features and message angles from one Cubiczan-style finance demo. Swap the weights and patterns for any market.
+
+**CrewAI is the live draft brain inside each swarm worker — not the whole system.** Scoring, pattern selection, brand critique, failover, and learning are deterministic Python. CrewAI only writes prose when live LLM keys are on.
+
+This repo **does not send** LinkedIn or email. Drafts stop at `approved_for_scout`. Pipeline Scout / Marketing Hunter own send.
+
+```text
+lead queue  →  swarm worker  →  research → score → draft → critic → gate
+                                      │
+                                      └─ outreach_event → Learner → icp_weights
+                                                                   message_patterns
+```
+
+---
+
+## What runs per lead
+
+Every lead — mock or live — goes through the same closed loop:
+
+1. **Research** — You.com Search / Research, with failover to cached ClickHouse context. Prefers One `you` when `ONE_SECRET` (or One CLI auth) and `ONE_YOU_CONNECTION_KEY` are set (`RESEARCH_PROVIDER=auto|one`). Otherwise HTTP with `YOU_API_KEY` / `YDC_API_KEY`. Retry once, then degrade and log `tool_failures`.
+2. **Score** — Deterministic ICP math from ClickHouse `icp_weights` (**not** CrewAI). Whatever features you store are multiplied by those weights. The demo set includes examples such as `material_weakness_or_sox`, `cfo_cio_title`, and `finance_ops_pain`.
+3. **Draft** — If live LLM keys are on (`MOCK_MODE=false` plus OpenAI or Boundless), CrewAI runs a **sequential** crew: Researcher → Scorer → Drafter → Critic. The critic’s body becomes the outreach draft. If CrewAI is off or the LLM call fails, Drafter fills the highest-scoring `message_patterns` template.
+4. **Critic (code)** — Second pass for **Cubiczan** brand spelling (never CubicZan) and overclaims (`guarantee`, length). Revises the body in place.
+5. **Gate + log + learn** — Human-gate stub, `outreach_event` in ClickHouse (or the in-memory store). Live production waits for Scout `learn` events unless `LEARN_ON_DRAFT=true`. Mock + `SIMULATE_OUTCOMES=true` still updates the Learner after each draft so a demo batch visibly shifts weights.
+
+When CrewAI is off (mock / no OpenAI or Boundless): the **same pipeline still runs** with template drafts from winning patterns. That is how CI and dry runs work.
+
+---
+
+## Self-improving loop
+
+The Learner is the point of the system. Later batches read the weights and pattern scores this batch just wrote.
+
+### What learns (in ClickHouse)
+
+| Store | What changes |
+| --- | --- |
+| **`icp_weights`** | Any feature keys you persist. After each outcome, Learner nudges the matching features by **± learning rate 0.12**, clamped **0.15–2.5**. Meetings reward more than a reply; thumbs-down penalizes more than ignore. **Examples** in this repo: `material_weakness_or_sox`, `cfo_cio_title`, `finance_ops_pain` (also `multi_entity_or_treasury`, `enterprise_or_midmarket`, `agentic_readiness`, `industry_fit`). |
+| **`message_patterns`** | Any outreach angles you persist. Wins / losses / impressions update a Bayesian score `(wins + 1) / (impressions + 2)`. Drafter always picks the **highest-scoring** pattern for the channel. **Examples** in this repo: `mw-90d`, `close-governed`, `treasury-obs` (`recon-auto`, `cfo-cio-copilot` too). |
+
+If ClickHouse is unset, an in-memory store keeps the same semantics so mock mode still learns.
+
+### Feedback that drives it
+
+`thumbs_up` / `thumbs_down` / `replied` / `meeting` / `ignore` / `sent` — from:
+
+- explicit `learn` events (the live path)
+- Pipeline Scout outcomes (after a real send, out of band)
+- optional LiveKit preference interviews (`metadata.source=livekit`)
+
+`SIMULATE_OUTCOMES=true` in mock mode invents an outcome from the score + angle so a demo swarm **visibly shifts weights** across batches. In the shipped example data, material-weakness and treasury angles win more often in that simulator. On the live path, set `LEARN_ON_DRAFT=true` only for demos; production should wait for real Scout outcomes.
+
+```bash
+uv run python -m self_improving_outreach learn --event \
+  '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"meeting","pattern_id":"mw-90d"}'
+uv run python -m self_improving_outreach learn --event \
+  '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"thumbs_up","pattern_id":"mw-90d"}'
+```
+
+### What does not auto-send
+
+```text
+research → score → draft → critic → human-gate → approved_for_scout
+```
+
+Send stays with Pipeline Scout (out of band). `HUMAN_GATE_ENABLED=true` writes `pending_approvals.jsonl` and holds the lead at `pending_review` instead of `approved_for_scout`.
+
+---
 
 ## Architecture
+
+Each swarm worker runs the closed loop above. CrewAI sits **inside** the draft step when live. One `you` / One Daytona are optional; direct You.com and Daytona SDK are the fallbacks.
 
 ```mermaid
 flowchart TB
   subgraph queue [Lead queue]
     CH[(ClickHouse leads)]
     JSON[Local JSON queue<br/>mock mode]
+    CU[ClickUp Queued ingest]
   end
 
   subgraph swarm [Swarm orchestrator]
-    W1[Worker 1 crew]
-    W2[Worker 2 crew]
-    WN[Worker N crew]
+    W1[Worker 1]
+    W2[Worker 2]
+    WN[Worker N]
   end
 
-  subgraph crew [Closed loop per lead]
-    R[Researcher<br/>You.com Search/Research]
-    S[Scorer<br/>ICP weights]
-    D[Drafter<br/>winning patterns]
-    C[Critic]
-    G[Human-gate stub]
+  subgraph worker [Per-lead loop — deterministic]
+    R[1 Research<br/>One you or You.com]
+    S[2 Score<br/>ICP weights — not CrewAI]
+    D[3 Draft<br/>CrewAI sequential crew or template]
+    C[4 Critic code<br/>Cubiczan / overclaims]
+    G[5 Human-gate stub]
     L[Learner]
   end
 
-  subgraph memory [Memory]
+  subgraph memory [ClickHouse or in-memory]
     WTS[icp_weights]
     PAT[message_patterns]
     EV[outreach_events]
@@ -36,18 +106,21 @@ flowchart TB
     RUNS[agent_runs]
   end
 
-  Scout[Marketing Hunter / Pipeline Scout<br/>LinkedIn send]
-  One[One you + daytona connections]
-  Daytona[Daytona traces / optional sandbox]
-  Voice[Optional LiveKit voice interview]
+  Crew[CrewAI draft brain<br/>live keys only]
+  OneYou[Optional One you]
+  Daytona[Optional One Daytona / SDK traces]
+  Scout[Pipeline Scout<br/>LinkedIn send — out of band]
+  Voice[Optional LiveKit interview]
 
+  CU --> JSON
   CH --> swarm
   JSON --> swarm
   swarm --> W1 & W2 & WN
-  W1 & W2 & WN --> crew
-  R -->|One you or YDC_API_KEY| One
+  W1 & W2 & WN --> worker
+  OneYou -.-> R
   R -->|retry once then cache| FAIL
   R --> S --> D --> C --> G --> EV
+  D -.-> Crew
   G -->|approved_for_scout| Scout
   EV --> L
   L --> WTS
@@ -55,32 +128,42 @@ flowchart TB
   PAT --> D
   WTS --> S
   Voice --> L
-  crew -.-> Daytona
-  One -.-> Daytona
+  worker -.-> Daytona
+  Daytona -.-> RUNS
 ```
 
-### Swarm loop
+### Swarm batch
 
 ```mermaid
 sequenceDiagram
   participant Q as Lead queue
   participant Sw as Swarm
-  participant You as You.com
+  participant You as One you / You.com
   participant Store as ClickHouse / memory
+  participant Crew as CrewAI (live only)
   participant Scout as Pipeline Scout
 
   loop each batch (--once or --loop)
     Sw->>Q: claim N leads (concurrency)
     par worker i
-      Sw->>You: live research (One you or direct key)
-      alt You.com fails twice
+      Sw->>You: live research
+      alt research fails twice
         You-->>Sw: degrade to cached context
         Sw->>Store: tool_failures + traces
       end
       Sw->>Store: score with icp_weights
-      Sw->>Store: draft from top message_patterns
-      Sw->>Store: outreach_event drafted
-      Sw->>Store: learner updates weights/patterns
+      alt live LLM keys
+        Sw->>Crew: Researcher → Scorer → Drafter → Critic
+        Crew-->>Sw: critic body as draft
+      else mock / no keys
+        Sw->>Store: template from top message_patterns
+      end
+      Sw->>Store: code critic + outreach_event
+      alt mock SIMULATE_OUTCOMES or LEARN_ON_DRAFT
+        Sw->>Store: Learner updates weights / patterns
+      else live
+        Note over Scout: Learner waits for Scout learn events
+      end
     end
     Note over Scout: Send is out of band.<br/>This repo stops at approved_for_scout.
   end
@@ -88,17 +171,9 @@ sequenceDiagram
 
 A tool failure in **one** worker switches that worker to the failover path. Other workers keep running. Daytona (or the local tracer) records spans onto `agent_runs`.
 
-## Closed loop
+Behavior specs: [`openspec/specs/`](openspec/specs/) (outreach pipeline, learning loop, swarm, ClickHouse, LLM provider).
 
-1. **Researcher** — You.com Search (`POST https://ydc-index.io/v1/search`) and Research (`POST https://api.you.com/v1/research`). Prefers One `you` actions when `ONE_SECRET` (or One CLI auth) and `ONE_YOU_CONNECTION_KEY` are set; otherwise `X-API-Key` from `YOU_API_KEY` / `YDC_API_KEY`. Retry once, then cached lead context.
-2. **Scorer** — Weighted ICP features stored in `icp_weights` (CFO/CIO title, SOX / material weakness, recon/treasury, industry fit, …).
-3. **Drafter** — Picks the highest-scoring Cubiczan angle from `message_patterns`.
-4. **Critic** — Brand spelling, overclaims, length. Does not send.
-5. **Human-gate stub** — `HUMAN_GATE_ENABLED=true` writes `pending_approvals.jsonl`; otherwise `approved_for_scout`.
-6. **Learner** — Explicit outcomes (`thumbs_up` / `thumbs_down` / `replied` / `meeting` / `ignore` / `sent`) update weights and pattern win rates. Mock swarm (`SIMULATE_OUTCOMES=true`) simulates outcomes so the next batch prefers winning angles. Live production waits for Scout `learn` events unless `LEARN_ON_DRAFT=true` (demo/CI opt-in).
-7. **Voice (optional)** — LiveKit Agents preference interview writes the same Learner path. Core text crew does not require LiveKit.
-
-CrewAI is used when `crewai` is installed and an LLM key is present (`OPENAI_API_KEY`, or Boundless via `LLM_PROVIDER=boundless` / Boundless fallback). Otherwise a deterministic mock crew runs the same stages (CI and laptop demos).
+---
 
 ## Quick start (mock, no API keys)
 
@@ -107,57 +182,47 @@ cp .env.example .env          # MOCK_MODE=true is the default
 uv sync --group dev
 uv run pytest
 uv run python -m self_improving_outreach show-config
+# Example lead from the shipped demo ICP (any company / title / pain works)
 uv run python -m self_improving_outreach run --lead '{"company":"Northline Manufacturing","title":"CFO","contact_name":"Priya Shah","industry":"manufacturing","signals":{"pain":"material weakness"}}'
 uv run python -m self_improving_outreach swarm --once --concurrency 3
 ```
 
-Continuous swarm (claims the queue, sleeps, repeats):
+CI (`.github/workflows/ci.yml`) runs the same mock pytest path. No secrets required.
+
+Continuous swarm (claim, sleep, repeat):
 
 ```bash
 uv run python -m self_improving_outreach swarm --concurrency 5 --loop --interval 300
 ```
 
-Learn from a real Scout outcome (`thumbs_up`, `thumbs_down`, `replied`, `meeting`, `ignore`, `sent`):
-
-```bash
-uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"meeting","pattern_id":"mw-90d"}'
-uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"thumbs_up","pattern_id":"mw-90d"}'
-uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"replied"}'
-```
-
-Reclaim leads so the swarm can claim them again (`queued`). Use after a demo run, or to unstick `processing`:
+Reclaim leads so the swarm can claim them again (`queued`). The committed `data/leads.sample.json` file is never overwritten.
 
 ```bash
 uv run python -m self_improving_outreach requeue --lead-id 11111111-1111-1111-1111-111111111111
 uv run python -m self_improving_outreach requeue --company "Northline"
 uv run python -m self_improving_outreach requeue --all-sample
 uv run python -m self_improving_outreach requeue --clear-processing
-uv run python -m self_improving_outreach queue reset --all-sample   # alias
 ```
 
-`--queue path.json` persists a work queue. The committed `data/leads.sample.json` file is never overwritten.
-
-Ingest a ClickUp **Queued** task (or webhook envelope with a `task` object) into the same queue. Pipeline Scout / Marketing Hunter can call this when status=Queued. Search + outreach only — no Google Ads, Facebook Ads, or Meta Ads.
+Ingest a ClickUp **Queued** task (or webhook envelope with a `task` object) into the same queue. Search + outreach only.
 
 ```bash
 uv run python -m self_improving_outreach ingest-clickup --file data/clickup_task.sample.json
-uv run python -m self_improving_outreach ingest-clickup --json '{"id":"abc","name":"Acme — Jane","status":{"status":"Queued"}}'
 uv run python -m self_improving_outreach queue upsert --from-json '{"company":"Acme","contact_name":"Jane","title":"CFO"}'
 ```
 
 Non-Queued ClickUp tasks are skipped unless you pass `--force`.
 
-## API keys locally
+### Live env (names only — never commit values)
 
-1. Copy `.env.example` → `.env` (gitignored).
-2. Fill only the providers you have. Missing keys keep that integration in mock / no-op.
+Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. Missing keys keep that integration in mock / no-op.
 
 | Variable | Used for |
 | --- | --- |
 | `RESEARCH_PROVIDER` | `auto` (default), `one`, or `you` |
 | `SANDBOX_PROVIDER` | `auto` (default), `one`, or `daytona` |
 | `ONE_SECRET`, `ONE_CLI`, `ONE_CLI_AUTH` | One CLI auth (`one --agent`); CLI login also works |
-| `ONE_YOU_CONNECTION_KEY`, `ONE_DAYTONA_CONNECTION_KEY` | One connection keys (env only — do not commit live keys) |
+| `ONE_YOU_CONNECTION_KEY`, `ONE_DAYTONA_CONNECTION_KEY` | One connection keys (env only) |
 | `ONE_DAYTONA_DOCKERFILE`, `ONE_DAYTONA_SNAPSHOT` | One sandbox create defaults (`buildInfo.dockerfileContent` + optional snapshot) |
 | `YOU_API_KEY` or `YDC_API_KEY` | Direct You.com Search / Contents / Research fallback |
 | `LLM_PROVIDER` | `openai` (default) or `boundless` |
@@ -166,111 +231,71 @@ Non-Queued ClickUp tasks are skipped unless you pass `--force`.
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_PORT`, `CLICKHOUSE_SECURE` | ClickHouse Cloud or local |
 | `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona SDK + OTEL traces (fallback when One Daytona is unset) |
 | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Optional live voice room (not required for transcript ingest) |
-| `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Optional post-draft transcript→Learner hook (default `false`; no LiveKit keys required) |
+| `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Optional post-draft transcript→Learner hook (default `false`) |
 | `MOCK_MODE`, `HUMAN_GATE_ENABLED`, `SIMULATE_OUTCOMES` | Runtime behavior |
-| `LEARN_ON_DRAFT` | Opt-in draft-time `simulate_outcome` / `apply_learn_event` on the live path (default `false`) |
+| `LEARN_ON_DRAFT` | Opt-in draft-time Learner on the live path (default `false`) |
 
-Never commit `.env`. The CLI `show-config` prints booleans only — not secret values.
-
-## GitHub Actions secrets
-
-Repository **Settings → Secrets and variables → Actions**. Use the same names as `.env.example`. CI (`/.github/workflows/ci.yml`) runs `uv run pytest` with `MOCK_MODE=true` and does **not** need secrets. Add keys only if you introduce a non-mock integration job:
-
-`YOU_API_KEY`, `YDC_API_KEY`, `ONE_SECRET`, `ONE_YOU_CONNECTION_KEY`, `ONE_DAYTONA_CONNECTION_KEY`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `OPENAI_API_KEY`, `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL`, `LLM_PROVIDER`.
-
-## Vercel project env
-
-This repo is a Python worker, not a Next.js app. If you later attach a Vercel cron or webhook:
+### `show-config`
 
 ```bash
-# names only — paste values in the Vercel UI or CLI prompts
-vercel env add YOU_API_KEY
-vercel env add OPENAI_API_KEY
-# …repeat for the table above
-vercel env pull .env.local
+uv run python -m self_improving_outreach show-config
 ```
 
-Do not put secrets in `vercel.ts` / `vercel.json`.
+Prints **booleans, provider names, and effective paths only** — never secret values. Use it to confirm `mock_mode`, `crewai`, `llm_provider`, `research_provider` (`one` / `you` / `mock`), `sandbox_provider` (`one` / `daytona` / `none`), `one_you_configured`, `learn_on_draft`, and `should_learn_on_draft`.
 
-## ClickHouse
+---
+
+## Optional pieces
+
+### ClickHouse
 
 Schema: `migrations/clickhouse/001_init.sql` (`leads`, `outreach_events`, `message_patterns`, `icp_weights`, `tool_failures`, `agent_runs`).
 
-Local:
-
 ```bash
 docker compose up -d
-# .env
-# CLICKHOUSE_HOST=localhost
-# CLICKHOUSE_PORT=8123
-# CLICKHOUSE_SECURE=false
-# CLICKHOUSE_USER=default
-# CLICKHOUSE_PASSWORD=localdev
-# CLICKHOUSE_DATABASE=outreach
+# CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8123 CLICKHOUSE_SECURE=false
+# CLICKHOUSE_USER=default CLICKHOUSE_PASSWORD=localdev CLICKHOUSE_DATABASE=outreach
 uv sync --extra clickhouse
 uv run python -m self_improving_outreach migrate
 ```
 
-Cloud: host from the ClickHouse Cloud console (HTTPS 8443, `CLICKHOUSE_SECURE=true`). If ClickHouse is unset, an in-memory store keeps the same learning semantics.
+Cloud: host from the ClickHouse Cloud console (HTTPS 8443, `CLICKHOUSE_SECURE=true`).
 
-## One (withone.ai)
+### One `you` / One Daytona
 
-When Sam’s You.com / Daytona platforms are connected on One, the swarm prefers those connections over raw `YDC_API_KEY` / `DAYTONA_API_KEY` HTTP clients.
+When One auth and connection keys are set, research prefers One `you` over raw `YDC_API_KEY`, and sandbox create/delete prefer One Daytona over the SDK.
 
 ```bash
 # .env — connection keys from `one list` (never commit live keys)
-RESEARCH_PROVIDER=auto          # one | you | auto
-SANDBOX_PROVIDER=auto           # one | daytona | auto
-ONE_SECRET=                     # or rely on `one init` / `one login`
-ONE_YOU_CONNECTION_KEY=         # live::you::default::<your-id>
-ONE_DAYTONA_CONNECTION_KEY=     # live::daytona::default::<your-id>
-DAYTONA_SANDBOX_RUNS=true       # optional; creates a sandbox per tracer session
+RESEARCH_PROVIDER=auto
+SANDBOX_PROVIDER=auto
+ONE_SECRET=
+ONE_YOU_CONNECTION_KEY=
+ONE_DAYTONA_CONNECTION_KEY=
 ```
 
 The adapter runs the One CLI (JSON agent mode), not a hardcoded HTTP client:
 
 ```bash
 one --agent actions search you "search" -t execute
-one --agent actions knowledge you <actionId>
 one --agent actions execute you <actionId> "$ONE_YOU_CONNECTION_KEY" -d '{"query":"...","count":5}'
 ```
 
-Default You.com action IDs (overridable): Search Unified Web and News `conn_mod_def::GK9ryNdQKGE::TiwS_VVUSE-wxbKljY4T4g`, Research `conn_mod_def::GK9rx6bXINM::MUbK6JMcTwWoiaxT6DmEIQ`. Default Daytona create-sandbox action: `conn_mod_def::GMgWX_S6VPA::VxlhHfBWQ4qfa9mXEX2OQQ`. Start / list / delete resolve via `actions search` unless you set `ONE_DAYTONA_*_SANDBOX_ACTION_ID`.
+One create-sandbox requires `buildInfo.dockerfileContent`. Name-only tracer creates merge a default Dockerfile (`FROM daytonaio/sandbox:latest`) and an optional snapshot (`ubuntu-4vcpu-8ram-100gb`). Override with `ONE_DAYTONA_DOCKERFILE` / `ONE_DAYTONA_SNAPSHOT` (blank snapshot omits the field).
 
-One’s create-sandbox schema requires `buildInfo.dockerfileContent`. Name-only tracer creates merge a default Dockerfile (`FROM daytonaio/sandbox:latest`) and an optional snapshot (`ubuntu-4vcpu-8ram-100gb`). Override with `ONE_DAYTONA_DOCKERFILE` / `ONE_DAYTONA_SNAPSHOT` (blank snapshot omits the field).
+Without One auth + keys, the existing direct You.com / Daytona clients run unchanged. `MOCK_MODE=true` still uses the mock researcher.
 
-`show-config` prints the **effective** `research_provider` (`one` / `you` / `mock`) and `sandbox_provider` (`one` / `daytona` / `none`) plus booleans — never `ONE_SECRET` or connection keys. `MOCK_MODE=true` (CI default) still uses the mock researcher.
+### CrewAI live (OpenAI or Boundless)
 
-Without One auth + keys, the existing direct clients run unchanged.
-
-## Daytona
-
-The `RunTracer` interface wraps every crew/swarm span. When One Daytona is configured, sandbox create/delete go through One. When `DAYTONA_API_KEY` is set and the `daytona` extra is installed (and One Daytona is not selected):
-
-```python
-from daytona import Daytona, DaytonaConfig
-config = DaytonaConfig(
-    api_key=os.environ["DAYTONA_API_KEY"],
-    api_url=os.environ.get("DAYTONA_API_URL", "https://app.daytona.io/api"),
-    otel_enabled=True,  # or DAYTONA_OTEL_ENABLED=true
-)
-daytona = Daytona(config)
-```
-
-`DAYTONA_SANDBOX_RUNS=true` optionally creates a sandbox per session. MVP tracing does not require that. Without the SDK/key, spans still land on `agent_runs.traces`.
-
-## Boundless (burn credits on `swarm --once`)
-
-Sam's credit is on **boundless.network** inference. Console: https://inference.boundless.network/
+`use_crewai` is true only when `MOCK_MODE` is not forcing mock **and** an LLM key is present. Boundless is OpenAI-compatible:
 
 | | |
 | --- | --- |
 | Base URL | `https://api.inference.boundless.network/v1` |
 | Auth | `Authorization: Bearer $BOUNDLESS_API_KEY` |
-| Default CrewAI model | `glm-5.2` |
-| Other models | `dsv4`, `qwen3.6`, `nemotron3-super`, `kimi-k3` |
+| Default model | `glm-5.2` (`dsv4`, `qwen3.6`, `nemotron3-super`, `kimi-k3` also work) |
 
-Do **not** use `api.boundlessapi.com`.
+Do **not** use `api.boundlessapi.com`. `LLM_PROVIDER=boundless` points CrewAI / LiteLLM at that `base_url`. If `LLM_PROVIDER=openai` but only `BOUNDLESS_API_KEY` is set, Boundless is the fallback. Each live crew runs several LLM tasks and **does spend** inference credit.
 
 ```bash
 # .env — never commit this file
@@ -279,75 +304,38 @@ LLM_PROVIDER=boundless
 BOUNDLESS_API_KEY=          # paste locally only
 BOUNDLESS_BASE_URL=https://api.inference.boundless.network/v1
 BOUNDLESS_MODEL=glm-5.2
-# YOU_API_KEY=              # optional; without it, research stays mocked
-```
 
-```bash
 uv sync --extra crew
-uv run python -m self_improving_outreach show-config   # booleans only; no secrets
+uv run python -m self_improving_outreach show-config
 uv run python -m self_improving_outreach swarm --once --concurrency 2
 ```
 
-`LLM_PROVIDER=boundless` points CrewAI / LiteLLM at that `base_url` with Bearer auth (key also copied to `OPENAI_API_KEY` / `OPENAI_BASE_URL`). If `LLM_PROVIDER=openai` but only `BOUNDLESS_API_KEY` is set, Boundless is the fallback. Each live crew runs several LLM tasks — this **does** spend Boundless credit. Keep `MOCK_MODE=true` (the default) for CI and laptop demos.
+### Daytona SDK fallback
 
-## LiveKit learner loop
+When One Daytona is not selected and `DAYTONA_API_KEY` plus the `daytona` extra are present, the tracer uses the Daytona SDK. `DAYTONA_SANDBOX_RUNS=true` optionally creates a sandbox per session — not required for drafts. Without the SDK/key, spans still land on `agent_runs.traces`.
 
-Marketing Hunter or an AE runs a **preference interview** (LiveKit room, or a saved JSON transcript). That interview feeds the **Learner** (`thumbs_up` / `thumbs_down`, notes, optional `pattern_id`). **Pipeline Scout / Marketing Hunter still own LinkedIn send** — this repo never posts.
+### LiveKit → Learner
+
+Optional preference interview (live room or saved JSON). Same Learner path as `learn`. Core text pipeline does not require LiveKit. `LIVEKIT_FEEDBACK_AUTO` defaults to **false**.
 
 ```bash
-# Mock thumbs (no LiveKit keys required)
 uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111-111111111111 --positive
-uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111-111111111111 --no-positive
-
-# Parse a saved interview transcript
-uv run python -m self_improving_outreach voice \
-  --lead-id 11111111-1111-1111-1111-111111111111 \
-  --transcript-file data/voice_transcript.sample.json
+uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111-111111111111 --transcript-file data/voice_transcript.sample.json
 ```
 
-Transcript JSON (any of `positive`, `sentiment`, `outcome`, `thumbs` for polarity):
+After a draft, `LIVEKIT_FEEDBACK_AUTO=true` plus `LIVEKIT_TRANSCRIPT_PATH` (file or `{lead_id}.json` directory) calls `record_voice_feedback` and writes `outreach_event` with `metadata.source=livekit`. If the flag is on but no transcript file exists, the draft still succeeds.
 
-```json
-{
-  "lead_id": "11111111-1111-1111-1111-111111111111",
-  "positive": true,
-  "pattern_id": "mw-90d",
-  "notes": "CFO preferred the 90-day material-weakness angle",
-  "transcript": "optional interview text"
-}
-```
-
-After a successful pipeline draft, set `LIVEKIT_FEEDBACK_AUTO=true` (default **false**) and `LIVEKIT_TRANSCRIPT_PATH` to a file or a directory of `{lead_id}.json` files. The hook calls `record_voice_feedback` and writes an `outreach_event` with `metadata.source=livekit`. LiveKit URL/keys are only needed for a live room — the core text path never requires them. If the flag is on and LiveKit is configured but no transcript file exists, the draft still succeeds and the hook no-ops.
-
-```bash
-uv sync --extra livekit
-uv run python -m self_improving_outreach voice --lead-id <uuid>
-```
-
-Without LiveKit keys the command stays idle for rooms and still records mock / file feedback. A live `AgentSession` should call `record_voice_feedback` after the interview.
-
-## How outcomes feed learning
-
-| Signal | Effect |
-| --- | --- |
-| `meeting`, `replied`, `thumbs_up` | Raise ICP weights for features present on the lead; raise pattern win rate |
-| `ignore`, `thumbs_down` | Lower those weights and the pattern score |
-| `sent` | Small positive (Pipeline Scout actually sent) |
-| You.com exception | `tool_failures` row; second failure degrades to cache; swarm continues |
-| Voice thumbs / transcript | Same as explicit thumbs via Learner; `outreach_events.metadata.source=livekit` |
-| `LEARN_ON_DRAFT=true` (or mock + `SIMULATE_OUTCOMES`) | After draft, `simulate_outcome` updates weights/patterns so `learned` is true |
-
-Drafter always reads **current** `message_patterns` ordered by score, so the next swarm batch prefers angles that worked.
+---
 
 ## Layout
 
 ```
 src/self_improving_outreach/   # CLI, crews, swarm, stores, tools, voice, llm provider
 migrations/clickhouse/         # DDL
-data/leads.sample.json         # 3 mock ICP leads
+data/leads.sample.json         # 3 example leads (demo ICP)
 data/voice_transcript.sample.json
 data/clickup_task.sample.json  # ClickUp webhook → queued lead
 openspec/specs/                # living behavior specs
 ```
 
-Optional extras: `uv sync --extra crew` · `--extra clickhouse` · `--extra daytona` · `--extra livekit` · `--extra you`.
+Extras: `uv sync --extra crew` · `--extra clickhouse` · `--extra daytona` · `--extra livekit` · `--extra you`.
