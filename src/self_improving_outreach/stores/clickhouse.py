@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
+import threading
 from datetime import datetime
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 from self_improving_outreach.config import Settings
 from self_improving_outreach.learning.defaults import default_patterns, default_weights
@@ -22,6 +25,10 @@ from self_improving_outreach.models import (
 )
 from self_improving_outreach.stores.memory import MemoryStore
 
+ClientFactory = Callable[[], Any]
+
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def _json(value: Any) -> str:
     return json.dumps(value, default=str)
@@ -33,32 +40,126 @@ def _parse_dt(value: Any) -> datetime:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-class ClickHouseStore:
-    """Persists learning tables in ClickHouse; seeds defaults on first use."""
+def quote_identifier(name: str) -> str:
+    """Accept simple ClickHouse identifiers only (no secrets, no quoting tricks)."""
+    if not _IDENT.match(name):
+        raise ValueError(f"Invalid ClickHouse identifier: {name!r}")
+    return name
 
-    def __init__(self, client: Any, database: str) -> None:
-        self._client = client
+
+class ThreadLocalClients:
+    """One clickhouse_connect client per thread. Sessions are not thread-safe."""
+
+    def __init__(self, factory: ClientFactory) -> None:
+        self._factory = factory
+        self._local = threading.local()
+
+    def get(self) -> Any:
+        client = getattr(self._local, "client", None)
+        if client is None:
+            client = self._factory()
+            self._local.client = client
+        return client
+
+
+def connect_clickhouse(
+    settings: Settings,
+    *,
+    database: Optional[str] = None,
+) -> Any:
+    """Open a clickhouse_connect client.
+
+    Pass ``database=""`` (empty) to omit the default database so migrate can
+    ``CREATE DATABASE IF NOT EXISTS`` when ClickHouse Cloud has no app DB yet.
+    Pass a name to select that database. ``None`` uses ``settings.clickhouse_database``.
+    """
+    try:
+        import clickhouse_connect
+    except ImportError as exc:
+        raise RuntimeError(
+            "clickhouse-connect is not installed. "
+            "Run: uv sync --extra clickhouse"
+        ) from exc
+    kwargs: dict[str, Any] = {
+        "host": settings.clickhouse_host,
+        "port": settings.clickhouse_port,
+        "username": settings.clickhouse_user,
+        "password": settings.clickhouse_password or "",
+        "secure": settings.clickhouse_secure,
+    }
+    if database is None:
+        kwargs["database"] = settings.clickhouse_database
+    elif database:
+        kwargs["database"] = database
+    return clickhouse_connect.get_client(**kwargs)
+
+
+def parse_sql_statements(sql_text: str) -> list[str]:
+    return [
+        chunk.strip()
+        for chunk in sql_text.split(";")
+        if chunk.strip() and not chunk.strip().startswith("--")
+    ]
+
+
+def apply_clickhouse_migration(
+    settings: Settings,
+    sql_path: Path,
+    *,
+    connect: Optional[Callable[..., Any]] = None,
+) -> int:
+    """CREATE DATABASE IF NOT EXISTS, then apply table DDL. Returns statement count.
+
+    Connects without selecting the app database so a missing ``outreach`` DB
+    does not fail the handshake.
+    """
+    connect_fn = connect or connect_clickhouse
+    client = connect_fn(settings, database="")
+    db = quote_identifier(settings.clickhouse_database)
+    client.command(f"CREATE DATABASE IF NOT EXISTS {db}")
+    statements = parse_sql_statements(sql_path.read_text(encoding="utf-8"))
+    for statement in statements:
+        client.command(statement)
+    return len(statements)
+
+
+class ClickHouseStore:
+    """Persists learning tables in ClickHouse; seeds defaults on first use.
+
+    Swarm workers share one store instance. clickhouse_connect sessions are not
+    thread-safe, so each thread gets its own client from ``client_factory``.
+    """
+
+    def __init__(
+        self,
+        client: Any = None,
+        database: str = "outreach",
+        *,
+        client_factory: Optional[ClientFactory] = None,
+    ) -> None:
+        if client_factory is None:
+            if client is None:
+                raise TypeError("ClickHouseStore requires client or client_factory")
+            pinned = client
+            client_factory = lambda: pinned  # noqa: E731 — single-thread test inject
+        self._clients = ThreadLocalClients(client_factory)
         self._database = database
         self._seeded = False
+        self._seed_lock = threading.Lock()
+        if client is not None:
+            self._clients._local.client = client
+
+    @property
+    def _client(self) -> Any:
+        """Thread-local clickhouse_connect client (migrate CLI uses store._client)."""
+        return self._clients.get()
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "ClickHouseStore":
-        try:
-            import clickhouse_connect
-        except ImportError as exc:
-            raise RuntimeError(
-                "clickhouse-connect is not installed. "
-                "Run: uv sync --extra clickhouse"
-            ) from exc
-        client = clickhouse_connect.get_client(
-            host=settings.clickhouse_host,
-            port=settings.clickhouse_port,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password or "",
-            database=settings.clickhouse_database,
-            secure=settings.clickhouse_secure,
-        )
-        return cls(client, settings.clickhouse_database)
+        def factory() -> Any:
+            return connect_clickhouse(settings)
+
+        return cls(client_factory=factory, database=settings.clickhouse_database)
 
     def _q(self, sql: str, parameters: Optional[dict[str, Any]] = None):
         return self._client.query(sql, parameters=parameters)
@@ -66,6 +167,13 @@ class ClickHouseStore:
     def _ensure_seed(self) -> None:
         if self._seeded:
             return
+        with self._seed_lock:
+            if self._seeded:
+                return
+            self._seed_unlocked()
+            self._seeded = True
+
+    def _seed_unlocked(self) -> None:
         existing = self._q("SELECT count() FROM icp_weights").result_rows[0][0]
         if existing == 0:
             now = utcnow()
@@ -106,7 +214,6 @@ class ClickHouseStore:
                     "updated_at",
                 ],
             )
-        self._seeded = True
 
     def upsert_lead(self, lead: Lead) -> Lead:
         self._ensure_seed()

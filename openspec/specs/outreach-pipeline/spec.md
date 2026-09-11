@@ -25,13 +25,22 @@ The system SHALL execute each lead through: research → score → draft → cri
 
 ### Requirement: Cubiczan brand constraints
 
-Drafts SHALL use the brand spelling **Cubiczan** (never CubicZan) and SHALL reflect governed multi-agent finance positioning (close, reconciliation, treasury, observability) and 90-day material-weakness remediation. Founder attribution SHALL be Sam/Shyam Desigan.
+Drafts SHALL use the brand spelling **Cubiczan** (never CubicZan or Cubic Zan) and SHALL reflect governed multi-agent finance positioning (close, reconciliation, treasury, observability) and 90-day material-weakness remediation. Founder attribution SHALL be Sam/Shyam Desigan.
+
+Critic brand checks SHALL treat **Cubiczan** as correct and SHALL NOT flag it as a misspelling of CubicZan (those strings differ only by the letter Z and MUST NOT be compared case-insensitively). Forbidden forms are the case-sensitive token CubicZan and the spaced form Cubic Zan (any spacing/casing of `cubic` + whitespace + `zan`).
+
+#### Scenario: Critic accepts correct Cubiczan spelling
+
+- GIVEN a draft whose body contains "Cubiczan" and does not contain "CubicZan" or "Cubic Zan"
+- WHEN Critic runs
+- THEN it SHALL NOT report "brand misspelling"
+- AND the draft may be accepted if no other issues apply
 
 #### Scenario: Critic rejects brand misspelling
 
-- GIVEN a draft containing "CubicZan"
+- GIVEN a draft containing "CubicZan" or "Cubic Zan"
 - WHEN Critic runs
-- THEN the draft is revised or flagged before it is logged as ready for scout
+- THEN the draft is revised to Cubiczan and flagged before it is logged as ready for scout
 
 ### Requirement: Send ownership
 
