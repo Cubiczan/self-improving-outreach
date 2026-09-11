@@ -36,7 +36,7 @@ When the swarm uses `ClickHouseStore`, concurrent workers SHALL NOT share a sing
 
 ### Requirement: Worker isolation
 
-A tool failure in one worker SHALL switch that worker to its failover path, log `tool_failures` and Daytona/trace spans, and SHALL NOT cancel other workers.
+A tool failure in one worker SHALL switch that worker to its failover path, log `tool_failures` and Daytona/trace spans, and SHALL NOT cancel other workers. Research MAY run through One `you` actions or the direct You.com client; the failover contract is the same.
 
 #### Scenario: You.com outage on one lead
 

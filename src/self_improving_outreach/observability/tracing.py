@@ -75,18 +75,36 @@ class DaytonaTracer(LoggingTracer):
         daytona = Daytona(config)
         # Optional: sandbox = daytona.create(); sandbox.process.code_run(...)
 
-    This scaffold records OTEL-style spans locally and initializes the client
-    when the SDK + API key are available. Creating a sandbox per crew run is
-    gated by DAYTONA_SANDBOX_RUNS because it is not required for text drafts.
+    This scaffold records OTEL-style spans locally. Sandbox create prefers One
+    ``daytona`` actions when ``SANDBOX_PROVIDER`` resolves to ``one``; otherwise
+    it initializes the Daytona SDK when the API key is available. Creating a
+    sandbox per crew run is gated by DAYTONA_SANDBOX_RUNS.
     """
 
-    def __init__(self, settings: Settings, run_id: str = "") -> None:
+    def __init__(self, settings: Settings, run_id: str = "", *, one_client=None) -> None:
         super().__init__(run_id=run_id)
         self.settings = settings
         self.client = None
         self.sandbox = None
-        if settings.daytona_api_key:
+        provider = settings.effective_sandbox_provider
+        if provider == "one":
+            self._try_init_one(one_client)
+        elif provider == "daytona" or settings.daytona_api_key:
             self._try_init()
+
+    def _try_init_one(self, one_client=None) -> None:
+        try:
+            from self_improving_outreach.tools.one_daytona import one_daytona_from_settings
+
+            self.client = one_client or one_daytona_from_settings(self.settings)
+            self.event("daytona.client_ready", {"provider": "one"})
+            if self.settings.daytona_sandbox_runs:
+                name = f"cubiczan-outreach-{self.run_id[:8]}" if self.run_id else "cubiczan-outreach"
+                self.sandbox = self.client.create({"name": name})
+                sandbox_id = getattr(self.sandbox, "id", "")
+                self.event("daytona.sandbox_created", {"provider": "one", "sandbox_id": sandbox_id})
+        except Exception as exc:  # noqa: BLE001
+            self.event("daytona.init_failed", {"provider": "one", "error": str(exc)})
 
     def _try_init(self) -> None:
         try:
@@ -101,10 +119,10 @@ class DaytonaTracer(LoggingTracer):
                 otel_enabled=self.settings.daytona_otel_enabled,
             )
             self.client = Daytona(config)
-            self.event("daytona.client_ready", {"api_url": self.settings.daytona_api_url})
+            self.event("daytona.client_ready", {"api_url": self.settings.daytona_api_url, "provider": "daytona"})
             if self.settings.daytona_sandbox_runs:
                 self.sandbox = self.client.create()
-                self.event("daytona.sandbox_created", {})
+                self.event("daytona.sandbox_created", {"provider": "daytona"})
         except Exception as exc:  # noqa: BLE001
             self.event("daytona.init_failed", {"error": str(exc)})
 
@@ -118,6 +136,6 @@ class DaytonaTracer(LoggingTracer):
 
 
 def build_tracer(settings: Settings, run_id: str = "") -> LoggingTracer:
-    if settings.daytona_api_key:
+    if settings.effective_sandbox_provider != "none" or settings.daytona_api_key:
         return DaytonaTracer(settings, run_id=run_id)
     return LoggingTracer(run_id=run_id)

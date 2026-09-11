@@ -73,6 +73,49 @@ def test_invalid_llm_provider_rejected():
         Settings(llm_provider="anthropic")
 
 
+def test_invalid_research_and_sandbox_providers_rejected():
+    with pytest.raises(ValidationError):
+        Settings(research_provider="bing")
+    with pytest.raises(ValidationError):
+        Settings(sandbox_provider="aws")
+
+
+def test_auto_research_prefers_one_then_you():
+    one = Settings(
+        one_secret="sk-test",
+        one_you_connection_key="live::you::default::test",
+        you_api_key="ydc",
+        one_cli_auth=False,
+    )
+    assert one.effective_research_provider == "one"
+    assert one.one_you_ready is True
+    you = Settings(you_api_key="ydc", one_cli_auth=False)
+    assert you.effective_research_provider == "you"
+    none = Settings(one_cli_auth=False)
+    assert none.effective_research_provider == "mock"
+
+
+def test_one_counts_as_live_research_for_auto_mock():
+    settings = Settings(
+        mock_mode=None,
+        openai_api_key="sk-oai",
+        one_secret="sk-test",
+        one_you_connection_key="live::you::default::test",
+        one_cli_auth=False,
+    )
+    assert settings.research_live is True
+    assert settings.is_mock is False
+
+
+def test_research_provider_one_falls_back_without_connection():
+    settings = Settings(
+        research_provider="one",
+        you_api_key="ydc",
+        one_cli_auth=False,
+    )
+    assert settings.effective_research_provider == "you"
+
+
 def test_apply_boundless_runtime_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
@@ -91,12 +134,21 @@ def test_public_settings_view_and_show_config_hide_secrets():
         boundless_api_key="sk-secret-boundless",
         openai_api_key="sk-secret-openai",
         livekit_api_secret="lk-secret",
+        one_secret="sk-secret-one",
+        one_you_connection_key="live::you::default::secret-conn",
+        one_daytona_connection_key="live::daytona::default::secret-conn",
+        one_cli_auth=False,
     )
     view = public_settings_view(settings)
     dumped = str(view)
     assert "sk-secret-boundless" not in dumped
     assert "sk-secret-openai" not in dumped
     assert "lk-secret" not in dumped
+    assert "sk-secret-one" not in dumped
+    assert "secret-conn" not in dumped
+    assert view["one_configured"] is True
+    assert view["one_you_configured"] is True
+    assert view["research_provider"] in {"one", "mock", "you"}
     assert view["boundless_configured"] is True
     assert view["openai_configured"] is True
     assert view["llm_provider"] == "boundless"
@@ -115,6 +167,8 @@ def test_show_config_hides_env_secrets(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-openai")
     monkeypatch.setenv("LIVEKIT_API_SECRET", "lk-secret")
     monkeypatch.setenv("LLM_PROVIDER", "boundless")
+    monkeypatch.setenv("ONE_SECRET", "sk-secret-one")
+    monkeypatch.setenv("ONE_YOU_CONNECTION_KEY", "live::you::default::secret-conn")
     from self_improving_outreach.config import reset_settings_cache
 
     reset_settings_cache()
@@ -124,4 +178,7 @@ def test_show_config_hides_env_secrets(monkeypatch: pytest.MonkeyPatch):
     assert "sk-secret-boundless" not in result.stdout
     assert "sk-secret-openai" not in result.stdout
     assert "lk-secret" not in result.stdout
+    assert "sk-secret-one" not in result.stdout
+    assert "secret-conn" not in result.stdout
     assert "boundless_configured" in result.stdout
+    assert "research_provider" in result.stdout

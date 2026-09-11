@@ -37,6 +37,7 @@ flowchart TB
   end
 
   Scout[Marketing Hunter / Pipeline Scout<br/>LinkedIn send]
+  One[One you + daytona connections]
   Daytona[Daytona traces / optional sandbox]
   Voice[Optional LiveKit voice interview]
 
@@ -44,6 +45,7 @@ flowchart TB
   JSON --> swarm
   swarm --> W1 & W2 & WN
   W1 & W2 & WN --> crew
+  R -->|One you or YDC_API_KEY| One
   R -->|retry once then cache| FAIL
   R --> S --> D --> C --> G --> EV
   G -->|approved_for_scout| Scout
@@ -54,6 +56,7 @@ flowchart TB
   WTS --> S
   Voice --> L
   crew -.-> Daytona
+  One -.-> Daytona
 ```
 
 ### Swarm loop
@@ -69,7 +72,7 @@ sequenceDiagram
   loop each batch (--once or --loop)
     Sw->>Q: claim N leads (concurrency)
     par worker i
-      Sw->>You: live research
+      Sw->>You: live research (One you or direct key)
       alt You.com fails twice
         You-->>Sw: degrade to cached context
         Sw->>Store: tool_failures + traces
@@ -87,7 +90,7 @@ A tool failure in **one** worker switches that worker to the failover path. Othe
 
 ## Closed loop
 
-1. **Researcher** — You.com Search (`POST https://ydc-index.io/v1/search`) and Research (`POST https://api.you.com/v1/research`). Auth header `X-API-Key` (`YOU_API_KEY` or `YDC_API_KEY`). Retry once, then cached lead context.
+1. **Researcher** — You.com Search (`POST https://ydc-index.io/v1/search`) and Research (`POST https://api.you.com/v1/research`). Prefers One `you` actions when `ONE_SECRET` (or One CLI auth) and `ONE_YOU_CONNECTION_KEY` are set; otherwise `X-API-Key` from `YOU_API_KEY` / `YDC_API_KEY`. Retry once, then cached lead context.
 2. **Scorer** — Weighted ICP features stored in `icp_weights` (CFO/CIO title, SOX / material weakness, recon/treasury, industry fit, …).
 3. **Drafter** — Picks the highest-scoring Cubiczan angle from `message_patterns`.
 4. **Critic** — Brand spelling, overclaims, length. Does not send.
@@ -127,12 +130,16 @@ uv run python -m self_improving_outreach learn --event '{"lead_id":"11111111-111
 
 | Variable | Used for |
 | --- | --- |
-| `YOU_API_KEY` or `YDC_API_KEY` | You.com Search / Contents / Research |
+| `RESEARCH_PROVIDER` | `auto` (default), `one`, or `you` |
+| `SANDBOX_PROVIDER` | `auto` (default), `one`, or `daytona` |
+| `ONE_SECRET`, `ONE_CLI`, `ONE_CLI_AUTH` | One CLI auth (`one --agent`); CLI login also works |
+| `ONE_YOU_CONNECTION_KEY`, `ONE_DAYTONA_CONNECTION_KEY` | One connection keys (env only — do not commit live keys) |
+| `YOU_API_KEY` or `YDC_API_KEY` | Direct You.com Search / Contents / Research fallback |
 | `LLM_PROVIDER` | `openai` (default) or `boundless` |
 | `OPENAI_API_KEY`, `CREWAI_MODEL` | Live CrewAI prose via OpenAI |
 | `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL` | OpenAI-compatible Boundless inference |
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_PORT`, `CLICKHOUSE_SECURE` | ClickHouse Cloud or local |
-| `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona client + OTEL traces |
+| `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona SDK + OTEL traces (fallback when One Daytona is unset) |
 | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Optional live voice room (not required for transcript ingest) |
 | `LIVEKIT_FEEDBACK_AUTO`, `LIVEKIT_TRANSCRIPT_PATH` | Post-draft Learner hook from a JSON transcript |
 | `MOCK_MODE`, `HUMAN_GATE_ENABLED`, `SIMULATE_OUTCOMES` | Runtime behavior |
@@ -143,7 +150,7 @@ Never commit `.env`. The CLI `show-config` prints booleans only — not secret v
 
 Repository **Settings → Secrets and variables → Actions**. Use the same names as `.env.example`. CI (`/.github/workflows/ci.yml`) runs `uv run pytest` with `MOCK_MODE=true` and does **not** need secrets. Add keys only if you introduce a non-mock integration job:
 
-`YOU_API_KEY`, `YDC_API_KEY`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `OPENAI_API_KEY`, `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL`, `LLM_PROVIDER`.
+`YOU_API_KEY`, `YDC_API_KEY`, `ONE_SECRET`, `ONE_YOU_CONNECTION_KEY`, `ONE_DAYTONA_CONNECTION_KEY`, `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `OPENAI_API_KEY`, `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL`, `LLM_PROVIDER`.
 
 ## Vercel project env
 
@@ -180,9 +187,37 @@ uv run python -m self_improving_outreach migrate
 
 Cloud: host from the ClickHouse Cloud console (HTTPS 8443, `CLICKHOUSE_SECURE=true`). If ClickHouse is unset, an in-memory store keeps the same learning semantics.
 
+## One (withone.ai)
+
+When Sam’s You.com / Daytona platforms are connected on One, the swarm prefers those connections over raw `YDC_API_KEY` / `DAYTONA_API_KEY` HTTP clients.
+
+```bash
+# .env — connection keys from `one list` (never commit live keys)
+RESEARCH_PROVIDER=auto          # one | you | auto
+SANDBOX_PROVIDER=auto           # one | daytona | auto
+ONE_SECRET=                     # or rely on `one init` / `one login`
+ONE_YOU_CONNECTION_KEY=         # live::you::default::<your-id>
+ONE_DAYTONA_CONNECTION_KEY=     # live::daytona::default::<your-id>
+DAYTONA_SANDBOX_RUNS=true       # optional; creates a sandbox per tracer session
+```
+
+The adapter runs the One CLI (JSON agent mode), not a hardcoded HTTP client:
+
+```bash
+one --agent actions search you "search" -t execute
+one --agent actions knowledge you <actionId>
+one --agent actions execute you <actionId> "$ONE_YOU_CONNECTION_KEY" -d '{"query":"...","count":5}'
+```
+
+Default You.com action IDs (overridable): Search Unified Web and News `conn_mod_def::GK9ryNdQKGE::TiwS_VVUSE-wxbKljY4T4g`, Research `conn_mod_def::GK9rx6bXINM::MUbK6JMcTwWoiaxT6DmEIQ`. Default Daytona create-sandbox action: `conn_mod_def::GMgWX_S6VPA::VxlhHfBWQ4qfa9mXEX2OQQ`. Start / list / delete resolve via `actions search` unless you set `ONE_DAYTONA_*_SANDBOX_ACTION_ID`.
+
+`show-config` prints the **effective** `research_provider` (`one` / `you` / `mock`) and `sandbox_provider` (`one` / `daytona` / `none`) plus booleans — never `ONE_SECRET` or connection keys. `MOCK_MODE=true` (CI default) still uses the mock researcher.
+
+Without One auth + keys, the existing direct clients run unchanged.
+
 ## Daytona
 
-The `RunTracer` interface wraps every crew/swarm span. When `DAYTONA_API_KEY` is set and the `daytona` extra is installed:
+The `RunTracer` interface wraps every crew/swarm span. When One Daytona is configured, sandbox create/delete go through One. When `DAYTONA_API_KEY` is set and the `daytona` extra is installed (and One Daytona is not selected):
 
 ```python
 from daytona import Daytona, DaytonaConfig

@@ -11,6 +11,8 @@ from self_improving_outreach.paths import sample_queue_path
 from self_improving_outreach.stores.clickhouse import build_store
 from self_improving_outreach.swarm.orchestrator import SwarmOrchestrator
 from self_improving_outreach.swarm.queue import JsonLeadQueue, StoreLeadQueue
+from self_improving_outreach.tools.one_cli import OneCli
+from self_improving_outreach.tools.one_you import OneYouComClient
 from self_improving_outreach.tools.you_com import HttpYouComClient, MockYouComClient, ResilientYouCom
 
 SAMPLE_QUEUE = sample_queue_path()
@@ -19,9 +21,21 @@ SAMPLE_QUEUE = sample_queue_path()
 def build_you_client(settings: Settings, mock: Optional[MockYouComClient] = None):
     if mock is not None:
         return mock
-    if settings.is_mock or not settings.you_key:
+    if settings.is_mock:
         return MockYouComClient()
-    return HttpYouComClient(api_key=settings.you_key)
+    provider = settings.effective_research_provider
+    if provider == "one":
+        return OneYouComClient(
+            settings.one_you_connection_key or "",
+            runner=OneCli(binary=settings.one_cli, timeout=settings.one_timeout_seconds),
+            search_action_id=settings.one_you_search_action_id,
+            research_action_id=settings.one_you_research_action_id,
+            contents_action_id=settings.one_you_contents_action_id,
+            timeout=settings.one_timeout_seconds,
+        )
+    if provider == "you" and settings.you_key:
+        return HttpYouComClient(api_key=settings.you_key)
+    return MockYouComClient()
 
 
 def build_runtime(

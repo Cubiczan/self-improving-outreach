@@ -59,7 +59,7 @@ class HttpYouComClient:
             except httpx.HTTPError as exc:
                 raise YouComError(f"search failed: {exc}") from exc
             payload = response.json()
-        return _bundle_from_search(query, payload)
+        return bundle_from_search(query, payload)
 
     def contents(self, urls: list[str]) -> ResearchBundle:
         with httpx.Client(timeout=self.timeout) as client:
@@ -73,17 +73,7 @@ class HttpYouComClient:
             except httpx.HTTPError as exc:
                 raise YouComError(f"contents failed: {exc}") from exc
             payload = response.json()
-        snippets = []
-        pages = payload if isinstance(payload, list) else payload.get("results") or payload.get("pages") or []
-        for page in pages:
-            snippets.append(
-                Snippet(
-                    title=page.get("title") or "",
-                    url=page.get("url") or "",
-                    text=(page.get("markdown") or page.get("html") or "")[:1500],
-                )
-            )
-        return ResearchBundle(query=";".join(urls), snippets=snippets, source="you.com.contents")
+        return bundle_from_contents(urls, payload)
 
     def research(self, prompt: str) -> ResearchBundle:
         with httpx.Client(timeout=max(self.timeout, 60.0)) as client:
@@ -97,20 +87,7 @@ class HttpYouComClient:
             except httpx.HTTPError as exc:
                 raise YouComError(f"research failed: {exc}") from exc
             payload = response.json()
-        answer = payload.get("answer") or payload.get("output") or payload.get("text") or ""
-        sources = payload.get("sources") or []
-        snippets = [
-            Snippet(title=src.get("title") or "", url=src.get("url") or "", text=src.get("snippet") or "")
-            for src in sources
-            if isinstance(src, dict)
-        ]
-        return ResearchBundle(
-            query=prompt,
-            snippets=snippets,
-            synthesis=str(answer)[:4000],
-            source="you.com.research",
-            raw=payload if isinstance(payload, dict) else {},
-        )
+        return bundle_from_research(prompt, payload)
 
     def _sdk_search(self, query: str, count: int) -> Optional[ResearchBundle]:
         try:
@@ -176,7 +153,12 @@ class MockYouComClient:
         )
 
 
-def _bundle_from_search(query: str, payload: dict[str, Any]) -> ResearchBundle:
+def bundle_from_search(
+    query: str,
+    payload: dict[str, Any],
+    *,
+    source: str = "you.com.search",
+) -> ResearchBundle:
     snippets: list[Snippet] = []
     results = payload.get("results") or payload
     web = []
@@ -196,7 +178,54 @@ def _bundle_from_search(query: str, payload: dict[str, Any]) -> ResearchBundle:
                 text=" ".join(item.get("snippets") or [item.get("description") or item.get("snippet") or ""])[:1500],
             )
         )
-    return ResearchBundle(query=query, snippets=snippets, source="you.com.search", raw=payload)
+    return ResearchBundle(query=query, snippets=snippets, source=source, raw=payload)
+
+
+def bundle_from_contents(
+    urls: list[str],
+    payload: Any,
+    *,
+    source: str = "you.com.contents",
+) -> ResearchBundle:
+    snippets = []
+    pages = payload if isinstance(payload, list) else (payload or {}).get("results") or (payload or {}).get("pages") or []
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        snippets.append(
+            Snippet(
+                title=page.get("title") or "",
+                url=page.get("url") or "",
+                text=(page.get("markdown") or page.get("html") or "")[:1500],
+            )
+        )
+    return ResearchBundle(query=";".join(urls), snippets=snippets, source=source)
+
+
+def bundle_from_research(
+    prompt: str,
+    payload: dict[str, Any],
+    *,
+    source: str = "you.com.research",
+) -> ResearchBundle:
+    answer = payload.get("answer") or payload.get("output") or payload.get("text") or ""
+    sources = payload.get("sources") or []
+    snippets = [
+        Snippet(title=src.get("title") or "", url=src.get("url") or "", text=src.get("snippet") or "")
+        for src in sources
+        if isinstance(src, dict)
+    ]
+    return ResearchBundle(
+        query=prompt,
+        snippets=snippets,
+        synthesis=str(answer)[:4000],
+        source=source,
+        raw=payload if isinstance(payload, dict) else {},
+    )
+
+
+# Back-compat alias used by older tests / imports.
+_bundle_from_search = bundle_from_search
 
 
 class ResilientYouCom:

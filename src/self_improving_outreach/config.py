@@ -8,10 +8,18 @@ from typing import Any, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from self_improving_outreach.one_defaults import (
+    DEFAULT_DAYTONA_CREATE_SANDBOX_ACTION_ID,
+    DEFAULT_YOU_RESEARCH_ACTION_ID,
+    DEFAULT_YOU_SEARCH_ACTION_ID,
+)
+
 # Sam's credit: https://inference.boundless.network/ — do not use api.boundlessapi.com
 DEFAULT_BOUNDLESS_BASE_URL = "https://api.inference.boundless.network/v1"
 DEFAULT_BOUNDLESS_MODEL = "glm-5.2"
 LLM_PROVIDERS = ("openai", "boundless")
+RESEARCH_PROVIDERS = ("auto", "one", "you")
+SANDBOX_PROVIDERS = ("auto", "one", "daytona")
 
 
 class Settings(BaseSettings):
@@ -36,6 +44,24 @@ class Settings(BaseSettings):
 
     you_api_key: Optional[str] = None
     ydc_api_key: Optional[str] = None
+
+    research_provider: str = "auto"
+    sandbox_provider: str = "auto"
+
+    one_secret: Optional[str] = None
+    one_cli: str = "one"
+    one_cli_auth: Optional[bool] = None
+    one_timeout_seconds: float = 90.0
+    one_you_connection_key: Optional[str] = None
+    one_daytona_connection_key: Optional[str] = None
+    one_you_search_action_id: str = DEFAULT_YOU_SEARCH_ACTION_ID
+    one_you_research_action_id: str = DEFAULT_YOU_RESEARCH_ACTION_ID
+    one_you_contents_action_id: Optional[str] = None
+    one_daytona_create_sandbox_action_id: str = DEFAULT_DAYTONA_CREATE_SANDBOX_ACTION_ID
+    one_daytona_start_sandbox_action_id: Optional[str] = None
+    one_daytona_list_sandbox_action_id: Optional[str] = None
+    one_daytona_delete_sandbox_action_id: Optional[str] = None
+    one_daytona_sandbox_path_var: str = "sandboxIdOrName"
 
     daytona_api_key: Optional[str] = None
     daytona_api_url: str = "https://app.daytona.io/api"
@@ -70,10 +96,83 @@ class Settings(BaseSettings):
             raise ValueError("LLM_PROVIDER must be 'openai' or 'boundless'")
         return normalized
 
+    @field_validator("research_provider")
+    @classmethod
+    def _normalize_research_provider(cls, value: str) -> str:
+        normalized = (value or "auto").strip().lower()
+        if normalized not in RESEARCH_PROVIDERS:
+            raise ValueError("RESEARCH_PROVIDER must be 'one', 'you', or 'auto'")
+        return normalized
+
+    @field_validator("sandbox_provider")
+    @classmethod
+    def _normalize_sandbox_provider(cls, value: str) -> str:
+        normalized = (value or "auto").strip().lower()
+        if normalized not in SANDBOX_PROVIDERS:
+            raise ValueError("SANDBOX_PROVIDER must be 'one', 'daytona', or 'auto'")
+        return normalized
+
     @property
     def you_key(self) -> Optional[str]:
         key = self.you_api_key or self.ydc_api_key
         return key or None
+
+    @property
+    def one_auth_configured(self) -> bool:
+        """True when One can authenticate (secret, explicit CLI flag, or local CLI config)."""
+        if self.one_secret:
+            return True
+        if self.one_cli_auth is True:
+            return True
+        if self.one_cli_auth is False:
+            return False
+        from self_improving_outreach.tools.one_cli import local_one_config_present
+
+        return local_one_config_present()
+
+    @property
+    def one_you_ready(self) -> bool:
+        return bool(self.one_you_connection_key) and self.one_auth_configured
+
+    @property
+    def one_daytona_ready(self) -> bool:
+        return bool(self.one_daytona_connection_key) and self.one_auth_configured
+
+    @property
+    def effective_research_provider(self) -> str:
+        """Resolved research path: ``one``, ``you``, or ``mock``."""
+        requested = self.research_provider
+        if requested == "you":
+            return "you" if self.you_key else "mock"
+        if requested == "one":
+            if self.one_you_ready:
+                return "one"
+            return "you" if self.you_key else "mock"
+        if self.one_you_ready:
+            return "one"
+        if self.you_key:
+            return "you"
+        return "mock"
+
+    @property
+    def effective_sandbox_provider(self) -> str:
+        """Resolved sandbox path: ``one``, ``daytona``, or ``none``."""
+        requested = self.sandbox_provider
+        if requested == "daytona":
+            return "daytona" if self.daytona_api_key else "none"
+        if requested == "one":
+            if self.one_daytona_ready:
+                return "one"
+            return "daytona" if self.daytona_api_key else "none"
+        if self.one_daytona_ready:
+            return "one"
+        if self.daytona_api_key:
+            return "daytona"
+        return "none"
+
+    @property
+    def research_live(self) -> bool:
+        return self.effective_research_provider in {"one", "you"}
 
     @property
     def clickhouse_configured(self) -> bool:
@@ -116,7 +215,7 @@ class Settings(BaseSettings):
     def is_mock(self) -> bool:
         if self.mock_mode is not None:
             return self.mock_mode
-        return not (self.has_llm_credentials and self.you_key)
+        return not (self.has_llm_credentials and self.research_live)
 
     @property
     def use_crewai(self) -> bool:
@@ -136,9 +235,15 @@ def public_settings_view(settings: Settings) -> dict[str, Any]:
         "llm_base_url": settings.llm_base_url,
         "openai_configured": bool(settings.openai_api_key),
         "boundless_configured": bool(settings.boundless_api_key),
+        "research_provider": "mock" if settings.is_mock else settings.effective_research_provider,
+        "sandbox_provider": settings.effective_sandbox_provider,
         "you_com_configured": bool(settings.you_key),
+        "one_configured": settings.one_auth_configured,
+        "one_you_configured": bool(settings.one_you_connection_key),
+        "one_daytona_configured": bool(settings.one_daytona_connection_key),
         "clickhouse_configured": bool(settings.clickhouse_host),
         "daytona_configured": bool(settings.daytona_api_key),
+        "daytona_sandbox_runs": settings.daytona_sandbox_runs,
         "livekit_configured": bool(settings.livekit_api_key),
         "livekit_feedback_auto": settings.livekit_feedback_auto,
         "crewai": settings.use_crewai,
