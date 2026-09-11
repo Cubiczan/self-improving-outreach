@@ -1,0 +1,77 @@
+[project]
+name = "self-improving-outreach"
+version = "0.1.0"
+description = "Cubiczan self-improving outreach and pipeline agents (CrewAI + You.com + ClickHouse + Daytona + LiveKit)."
+readme = "README.md"
+authors = [{ name = "Sam Desigan", email = "sam@cubiczan.com" }]
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["cubiczan", "crewai", "outreach", "clickhouse"]
+dependencies = [
+  "pydantic>=2.7",
+  "pydantic-settings>=2.4",
+  "httpx>=0.27",
+  "python-dotenv>=1.0",
+  "typer>=0.12",
+  "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+]
+crew = [
+  "crewai>=0.80",
+]
+clickhouse = [
+  "clickhouse-connect>=0.8",
+]
+daytona = [
+  "daytona>=0.21",
+]
+livekit = [
+  "livekit-agents>=1.2",
+]
+you = [
+  "youdotcom>=0.1",
+]
+all = [
+  "self-improving-outreach[crew,clickhouse,daytona,livekit,you]",
+]
+
+[project.scripts]
+self-improving-outreach = "self_improving_outreach.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/self_improving_outreach"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/self_improving_outreach" = "self_improving_outreach"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/migrations",
+  "/data",
+  "/README.md",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+]

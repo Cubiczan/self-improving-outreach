@@ -1,0 +1,28 @@
+# Local secrets — never commit
+.env
+.env.local
+.env.*.local
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Runtime state (mock swarm / human gate)
+pending_approvals.jsonl
+.swarm-state.json
+data/leads.local.json
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
