@@ -4,9 +4,9 @@ A closed-loop system for **any outbound sales / outreach** — not a finance-onl
 
 The repo ships **example** ICP features and message angles from one Cubiczan-style finance demo. Swap the weights and patterns for any market.
 
-**CrewAI is the live draft brain inside each swarm worker — not the whole system.** Scoring, pattern selection, brand critique, failover, and learning are deterministic Python. CrewAI only writes prose when live LLM keys are on.
+**CrewAI is the live draft brain inside each swarm worker — not the whole system.** Scoring, pattern selection, brand critique, failover, and learning are deterministic Python. CrewAI writes and hardens prose when live LLM keys are on; it does not recompute ICP Score, update the Learner, or bypass the CHP decision lock.
 
-This repo **does not send** LinkedIn or email. Drafts stop at `approved_for_scout`. Pipeline Scout / Marketing Hunter own send.
+This repo **does not send** LinkedIn or email. When CHP lock is on (live default), drafts stay `provisional` until a named human lock seals an evidence pack — the only path to `approved_for_scout`. Pipeline Scout / Marketing Hunter own send.
 
 ```text
 lead queue  →  swarm worker  →  research → score → draft → critic → gate
@@ -23,9 +23,9 @@ Every lead — mock or live — goes through the same closed loop:
 
 1. **Research** — You.com Search / Research, with failover to cached ClickHouse context. Prefers One `you` when `ONE_SECRET` (or One CLI auth) and `ONE_YOU_CONNECTION_KEY` are set (`RESEARCH_PROVIDER=auto|one`). Otherwise HTTP with `YOU_API_KEY` / `YDC_API_KEY`. Retry once, then degrade and log `tool_failures`.
 2. **Score** — Deterministic ICP math from ClickHouse `icp_weights` (**not** CrewAI). Whatever features you store are multiplied by those weights. The demo set includes examples such as `material_weakness_or_sox`, `cfo_cio_title`, and `finance_ops_pain`.
-3. **Draft** — If live LLM keys are on (`MOCK_MODE=false` plus OpenAI or Boundless), CrewAI runs a **sequential** crew: Researcher → Scorer → Drafter → Critic. The critic’s body becomes the outreach draft. If CrewAI is off or the LLM call fails, Drafter fills the highest-scoring `message_patterns` template.
+3. **Draft** — If live LLM keys are on (`MOCK_MODE=false` plus OpenAI or Boundless), CrewAI runs a sequential crew. Default `CREWAI_MODE=full`: Researcher (You.com tool) → Interpreter Scorer → Strategist → Drafter → Adversary Critic. `draft` keeps the older 4-agent body-only crew. The critic’s body becomes the outreach draft. CrewAI does **not** set send-readiness. If CrewAI is off or the LLM call fails, Drafter fills the highest-scoring `message_patterns` template.
 4. **Critic (code)** — Second pass for **Cubiczan** brand spelling (never CubicZan) and overclaims (`guarantee`, length). Revises the body in place.
-5. **CHP decision lock** (live default) — Sealed R0 foundation from independently hashed research / score / draft, then a non-skippable structural adversary, then `provisional`. A **named human** must `approve` or `deny`. Approve seals an immutable evidence pack (`R0 + adversary + lock`) and is the only path to `locked` → `approved_for_scout`. Mock CI leaves this off unless `CHP_LOCK_ENABLED=true`.
+5. **CHP decision lock** (live default; authoritative for send-readiness) — Sealed R0 foundation from independently hashed research / score / draft, then a non-skippable structural adversary, then `provisional`. A **named human** must `approve` or `deny`. Approve seals an immutable evidence pack (`R0 + adversary + lock`) and is the only path to `locked` → `approved_for_scout`. CrewAI’s Adversary Critic is complementary draft-brain only; its notes MAY be recorded as extras and MUST NOT replace this pass. Mock CI leaves CHP off unless `CHP_LOCK_ENABLED=true`.
 6. **Gate + log + learn** — Human-gate stub when CHP is off; `outreach_event` in ClickHouse (or the in-memory store). Live production waits for Scout `learn` events unless `LEARN_ON_DRAFT=true`. Mock + `SIMULATE_OUTCOMES=true` still updates the Learner after each draft so a demo batch visibly shifts weights. Score math and Learner weights stay deterministic Python.
 
 When CrewAI is off (mock / no OpenAI or Boundless): the **same pipeline still runs** with template drafts from winning patterns. That is how CI and dry runs work.
@@ -164,8 +164,8 @@ sequenceDiagram
       end
       Sw->>Store: score with icp_weights
       alt live LLM keys
-        Sw->>Crew: Researcher → Scorer → Drafter → Critic
-        Crew-->>Sw: critic body as draft
+        Sw->>Crew: Researcher → Scorer → Strategist → Drafter → Adversary Critic
+        Crew-->>Sw: hardened body as draft
       else mock / no keys
         Sw->>Store: template from top message_patterns
       end
@@ -256,7 +256,7 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 | `ONE_DAYTONA_DOCKERFILE`, `ONE_DAYTONA_SNAPSHOT` | One sandbox create defaults (`buildInfo.dockerfileContent` + optional snapshot) |
 | `YOU_API_KEY` or `YDC_API_KEY` | Direct You.com Search / Contents / Research fallback |
 | `LLM_PROVIDER` | `openai` (default) or `boundless` |
-| `OPENAI_API_KEY`, `CREWAI_MODEL` | Live CrewAI prose via OpenAI |
+| `OPENAI_API_KEY`, `CREWAI_MODEL`, `CREWAI_MODE` | Live CrewAI prose via OpenAI (`off` / `draft` / `full`) |
 | `BOUNDLESS_API_KEY`, `BOUNDLESS_BASE_URL`, `BOUNDLESS_MODEL` | OpenAI-compatible Boundless inference |
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE`, `CLICKHOUSE_PORT`, `CLICKHOUSE_SECURE` | ClickHouse Cloud or local |
 | `DAYTONA_API_KEY`, `DAYTONA_API_URL`, `DAYTONA_OTEL_ENABLED` | Daytona SDK + OTEL traces (fallback when One Daytona is unset) |
@@ -273,7 +273,7 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 uv run python -m self_improving_outreach show-config
 ```
 
-Prints **booleans, provider names, and effective paths only** — never secret values. Use it to confirm `mock_mode`, `crewai`, `chp_lock_enabled`, `llm_provider`, `research_provider` (`one` / `you` / `mock`), `sandbox_provider` (`one` / `daytona` / `none`), `one_you_configured`, `learn_on_draft`, and `should_learn_on_draft`.
+Prints **booleans, provider names, and effective paths only** — never secret values. Use it to confirm `mock_mode`, `crewai`, `crewai_mode`, `chp_lock_enabled`, `llm_provider`, `research_provider` (`one` / `you` / `mock`), `sandbox_provider` (`one` / `daytona` / `none`), `one_you_configured`, `learn_on_draft`, and `should_learn_on_draft`.
 
 ---
 
@@ -319,7 +319,21 @@ Without One auth + keys, the existing direct You.com / Daytona clients run uncha
 
 ### CrewAI live (OpenAI or Boundless)
 
-`use_crewai` is true only when `MOCK_MODE` is not forcing mock **and** an LLM key is present. Boundless is OpenAI-compatible:
+CrewAI utilization is **inside each swarm worker**, not a replacement for the closed loop. Score numbers still come from ClickHouse / in-memory `icp_weights`. The Learner still updates weights and patterns from outcomes. The code brand critic still runs after CrewAI. The CHP decision lock (R0 → structural adversary → named human lock → evidence pack) still owns send-readiness. There is **no auto-send**.
+
+`use_crewai` is true only when `MOCK_MODE` is not forcing mock **and** an LLM key is present. `CREWAI_MODE` then selects how much of the crew runs:
+
+| Mode | What runs |
+| --- | --- |
+| `off` | Deterministic template draft (also the mock / no-keys path) |
+| `draft` | Compat: Researcher → Interpreter Scorer → Drafter → Critic, body only, no tools |
+| `full` (default when `use_crewai`) | You.com tool on Researcher (and Strategist), plus Strategist + Adversary Critic |
+
+Full-mode agents are framed for **general outbound**, not CFO/CIO-only finance copy. Stored `message_patterns` / ICP features in this repo are examples. The CrewAI Adversary Critic hardens prose (weak claims, compliance/send risk, overclaims) and MAY attach notes as extras on the CHP structural adversary report. It does **not** seal R0, skip the structural adversary, lock, or promote to `approved_for_scout`. An optional external `consensus-hardening-protocol` package may mention a general-domain scoring floor; that import is unrelated to the in-repo CHP lock and is not a dependency.
+
+Tracer events: `crewai.mode`, `crewai.tools` (attached names + call count), `crewai.fallback`.
+
+Boundless is OpenAI-compatible:
 
 | | |
 | --- | --- |
