@@ -1,6 +1,6 @@
 # Self Improving Outreach
 
-A closed-loop system for **any outbound sales / outreach** — not a finance-only or CFO/CIO product. Research a lead, score it against *your* ICP weights, draft a message, then **learn** from what happened so the next draft is better.
+A closed-loop system for **any outbound sales / outreach**. Research a lead, score it against *your* ICP weights, draft a message, then **learn** from what happened so the next draft is better.
 
 The repo ships **example** ICP features and message angles from one Cubiczan-style finance demo. Swap the weights and patterns for any market.
 
