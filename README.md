@@ -191,7 +191,7 @@ A tool failure in **one** worker switches that worker to the failover path. Othe
 
 Dashboard screenshot of Daytona **Sandbox Details → Traces** (sandbox `traces-demo`). The tab can stay empty until the sandbox emits telemetry. See [`docs/daytona/`](docs/daytona/).
 
-Behavior specs: [`openspec/specs/`](openspec/specs/) (outreach pipeline, learning loop, swarm, ClickHouse, LLM provider).
+Behavior specs: [`openspec/specs/`](openspec/specs/) (outreach pipeline, learning loop, swarm, ClickHouse, LLM provider, Mixpanel analytics).
 
 ---
 
@@ -270,6 +270,9 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 | `MOCK_MODE`, `HUMAN_GATE_ENABLED`, `SIMULATE_OUTCOMES` | Runtime behavior |
 | `CHP_LOCK_ENABLED`, `CHP_DECISIONS_PATH` | CHP decision lock (default true on live; named lock + evidence pack) |
 | `LEARN_ON_DRAFT`, `MOCK_LEARN_OUTCOMES` | Opt-in draft-time Learner on the live path (default `false`) |
+| `ENVIRONMENT` | `production` / `prod` vs development (default). Selects Mixpanel token + super property |
+| `MIXPANEL_TOKEN`, `MIXPANEL_TOKEN_DEV`, `MIXPANEL_TOKEN_PROD` | Mixpanel project tokens (env only; example values in `.env.example`) |
+| `OPERATOR_ID`, `MIXPANEL_DISTINCT_ID` | Optional stable operator pk for Mixpanel `identify` (never email) |
 
 ### `show-config`
 
@@ -277,7 +280,7 @@ Copy `.env.example` → `.env` (gitignored). Fill only the providers you have. M
 uv run python -m self_improving_outreach show-config
 ```
 
-Prints **booleans, provider names, and effective paths only** — never secret values. Use it to confirm `mock_mode`, `crewai`, `crewai_mode`, `chp_lock_enabled`, `llm_provider`, `research_provider` (`one` / `you` / `mock`), `sandbox_provider` (`one` / `daytona` / `none`), `one_you_configured`, `learn_on_draft`, and `should_learn_on_draft`.
+Prints **booleans, provider names, and effective paths only** — never secret values. Use it to confirm `mock_mode`, `crewai`, `crewai_mode`, `chp_lock_enabled`, `llm_provider`, `research_provider` (`one` / `you` / `mock`), `sandbox_provider` (`one` / `daytona` / `none`), `one_you_configured`, `learn_on_draft`, `should_learn_on_draft`, `environment`, and `mixpanel_configured`.
 
 ---
 
@@ -374,6 +377,41 @@ uv run python -m self_improving_outreach voice --lead-id 11111111-1111-1111-1111
 ```
 
 After a draft, `LIVEKIT_FEEDBACK_AUTO=true` plus `LIVEKIT_TRANSCRIPT_PATH` (file or `{lead_id}.json` directory) calls `record_voice_feedback` and writes `outreach_event` with `metadata.source=livekit`. If LiveKit is configured and no transcript file exists, the preference-interview stub applies a sample transcript (`metadata.stub=true`). Without LiveKit keys and without a file, auto is a no-op.
+
+### Mixpanel analytics
+
+Official `mixpanel` Python SDK. Tokens are read from env only (documented examples in `.env.example`). No consent gate. Missing token is a no-op. `show-config` never prints tokens.
+
+| | |
+| --- | --- |
+| Super properties | `product=sio`, `platform=server`, `environment=production\|development` |
+| Production token | `ENVIRONMENT=production` (or `prod`) → `MIXPANEL_TOKEN_PROD` or `MIXPANEL_TOKEN` (ImpactQuadrant LLC) |
+| Dev token (default) | `MIXPANEL_TOKEN` or `MIXPANEL_TOKEN_DEV` (Cubiczan Development) |
+| Identity | `identify(user_id)` with a DB pk / `OPERATOR_ID` — never email. `analytics reset` is the logout hook (this repo has no logout). `people.set` only after identify. |
+
+Events in this Python product:
+
+| Event | Hook |
+| --- | --- |
+| `sign_up_completed` | Helper + `analytics sign-up --user-id <pk> --method cli`. **No signup flow exists** — call this when a stable operator identity is first established. Do not invent a fake path. |
+| `linkedin_connect_accepted` | **Value moment.** `track_linkedin_connect_accepted(...)` from `apply_learn_event` when Scout / accept-check marks `linkedin_connect_accepted` (or notes contain that signal), and from `analytics linkedin-connect-accepted`. Does **not** send LinkedIn. |
+| `contact_submitted` | **Site-only** — implemented on the Cubiczan marketing site, not in this repo. |
+
+```bash
+# First operator identity (no account-creation flow in this repo)
+uv run python -m self_improving_outreach analytics sign-up --user-id 42 --method cli
+uv run python -m self_improving_outreach analytics identify --user-id 42
+uv run python -m self_improving_outreach analytics reset
+
+# Value moment (accept-check / Scout). Does not send LinkedIn.
+uv run python -m self_improving_outreach analytics linkedin-connect-accepted \
+  --company "Northline Manufacturing" --person-name "Priya Shah" \
+  --linkedin-url "https://www.linkedin.com/in/example" --batch-id swarm-1
+
+# Learner live path: Scout learn JSON may set the flag
+uv run python -m self_improving_outreach learn --event \
+  '{"lead_id":"11111111-1111-1111-1111-111111111111","outcome":"replied","linkedin_connect_accepted":true,"pattern_id":"mw-90d"}'
+```
 
 ---
 

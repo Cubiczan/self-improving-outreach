@@ -40,6 +40,16 @@ def _mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLICKUP_QUEUE_STATUS", raising=False)
     monkeypatch.delenv("CHP_LOCK_ENABLED", raising=False)
     monkeypatch.delenv("CHP_DECISIONS_PATH", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("MIXPANEL_TOKEN", raising=False)
+    monkeypatch.delenv("MIXPANEL_TOKEN_DEV", raising=False)
+    monkeypatch.delenv("MIXPANEL_TOKEN_PROD", raising=False)
+    monkeypatch.delenv("OPERATOR_ID", raising=False)
+    monkeypatch.delenv("MIXPANEL_DISTINCT_ID", raising=False)
     reset_settings_cache()
+    from self_improving_outreach.analytics.mixpanel import reset_analytics_cache
+
+    reset_analytics_cache()
     yield
     reset_settings_cache()
+    reset_analytics_cache()

@@ -20,6 +20,8 @@ def test_cli_show_config_is_mock():
     assert "sandbox_provider" in result.stdout
     assert "one_configured" in result.stdout
     assert "chp_lock_enabled" in result.stdout
+    assert "mixpanel_configured" in result.stdout
+    assert "environment" in result.stdout
 
 
 def test_cli_run_one_lead():

@@ -194,6 +194,8 @@ def test_public_settings_view_and_show_config_hide_secrets():
     assert view["simulate_outcomes"] is True
     assert view["chp_lock_enabled"] is False
     assert view["crewai_mode"] == "off"
+    assert view["environment"] == "development"
+    assert view["mixpanel_configured"] is False
 
     runner = CliRunner()
     result = runner.invoke(app, ["show-config"])

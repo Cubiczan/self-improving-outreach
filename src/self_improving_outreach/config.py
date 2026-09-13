@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     clickup_list_id: str = "901716996906"
     clickup_queue_status: str = "Queued"
 
+    # Mixpanel (project tokens from env only — see .env.example). No consent gate.
+    environment: Optional[str] = None
+    mixpanel_token: Optional[str] = None
+    mixpanel_token_dev: Optional[str] = None
+    mixpanel_token_prod: Optional[str] = None
+    operator_id: Optional[str] = None
+    mixpanel_distinct_id: Optional[str] = None
+
     @field_validator("llm_provider")
     @classmethod
     def _normalize_llm_provider(cls, value: str) -> str:
@@ -272,6 +280,35 @@ class Settings(BaseSettings):
     def clickup_configured(self) -> bool:
         return bool(self.clickup_api_token)
 
+    @property
+    def resolved_environment(self) -> str:
+        """Mixpanel / runtime environment: production or development."""
+        value = (self.environment or "").strip().lower()
+        if value in ("prod", "production"):
+            return "production"
+        return "development"
+
+    @staticmethod
+    def _nonzero(value: Optional[str]) -> Optional[str]:
+        text = (value or "").strip()
+        return text or None
+
+    @property
+    def resolved_mixpanel_token(self) -> Optional[str]:
+        """Prod token when ENVIRONMENT is production; otherwise MIXPANEL_TOKEN or DEV."""
+        if self.resolved_environment == "production":
+            return self._nonzero(self.mixpanel_token_prod) or self._nonzero(self.mixpanel_token)
+        return self._nonzero(self.mixpanel_token) or self._nonzero(self.mixpanel_token_dev)
+
+    @property
+    def mixpanel_configured(self) -> bool:
+        return bool(self.resolved_mixpanel_token)
+
+    @property
+    def resolved_operator_id(self) -> Optional[str]:
+        """Stable operator pk (never email). OPERATOR_ID or MIXPANEL_DISTINCT_ID."""
+        return self._nonzero(self.operator_id) or self._nonzero(self.mixpanel_distinct_id)
+
 
 def public_settings_view(settings: Settings) -> dict[str, Any]:
     """Non-secret configuration for CLI / diagnostics. Never includes key material."""
@@ -305,6 +342,9 @@ def public_settings_view(settings: Settings) -> dict[str, Any]:
         "crewai": settings.use_crewai,
         "crewai_mode": settings.resolved_crewai_mode,
         "chp_lock_enabled": settings.resolved_chp_lock_enabled,
+        "environment": settings.resolved_environment,
+        "mixpanel_configured": settings.mixpanel_configured,
+        "operator_identified": bool(settings.resolved_operator_id),
         "sample_queue": str(sample_queue_path()),
     }
 

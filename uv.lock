@@ -2205,6 +2205,18 @@ wheels = [
 ]
 
 [[package]]
+name = "mixpanel"
+version = "4.11.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/d9/9d02602a65d6d6874ee938e66beeefa52689f52a9ffd19ceb3fed501a123/mixpanel-4.11.1.tar.gz", hash = "sha256:96440d36c30ce9a845141302b6249ac1c6dccc097ce20d480100c6a1041ce78e", size = 11976, upload-time = "2025-08-26T01:17:09.053Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/de/1de316b634b0ac5eafab086d6a6bd60b69e3ff7df1634bd3996a772db4f8/mixpanel-4.11.1-py3-none-any.whl", hash = "sha256:130633fb7d65f1fea10a9b6a6d3b8239121f2039ff2280ceb97cb9a73a711f29", size = 10026, upload-time = "2025-08-26T01:17:07.125Z" },
+]
+
+[[package]]
 name = "mmh3"
 version = "5.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4296,6 +4308,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "mixpanel" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -4344,6 +4357,7 @@ requires-dist = [
     { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.21" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "livekit-agents", marker = "extra == 'livekit'", specifier = ">=1.2" },
+    { name = "mixpanel", specifier = ">=4.10.1,<5" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
