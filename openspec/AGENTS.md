@@ -11,3 +11,5 @@ When changing outreach, scoring, learning, swarm, CHP lock, or integrations, upd
 Boundless is an OpenAI-compatible LLM provider (`openspec/specs/llm-provider/spec.md`). `CREWAI_MODE=off|draft|full` (default `full` when live) is draft-brain only and does not bypass the CHP lock. Voice transcripts feed the Learner with `metadata.source=livekit`.
 
 You.com research and Daytona sandboxes prefer One (`openspec/specs/one-integrations/spec.md`) when `ONE_SECRET` or CLI auth plus connection keys are set.
+
+Mixpanel product analytics (`openspec/specs/mixpanel-analytics/spec.md`) reads tokens from env, never invents signup, and does not implement site-only `contact_submitted`.

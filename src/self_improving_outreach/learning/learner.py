@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from self_improving_outreach.learning.defaults import default_weights
 from self_improving_outreach.learning.scorer import extract_features
 from self_improving_outreach.models import (
@@ -14,14 +16,26 @@ from self_improving_outreach.models import (
 )
 from self_improving_outreach.stores.base import OutreachStore
 
+logger = logging.getLogger(__name__)
+
 LEARNING_RATE = 0.12
 WEIGHT_MIN = 0.15
 WEIGHT_MAX = 2.5
 BAYES_PRIOR = 1.0
 
 
-def apply_learn_event(store: OutreachStore, event: LearnEvent, lead: Lead | None = None) -> dict[str, float]:
-    """Mutate store weights + patterns. Returns the updated weight map."""
+def apply_learn_event(
+    store: OutreachStore,
+    event: LearnEvent,
+    lead: Lead | None = None,
+    *,
+    analytics=None,
+) -> dict[str, float]:
+    """Mutate store weights + patterns. Returns the updated weight map.
+
+    When the LearnEvent is a LinkedIn accept (Scout / accept-check / live
+    outcome), also fires Mixpanel ``linkedin_connect_accepted``. Does not send.
+    """
     lead = lead or store.get_lead(event.lead_id)
     features = event.features or (extract_features(lead) if lead else {})
     weights = store.get_weights() or default_weights()
@@ -41,6 +55,14 @@ def apply_learn_event(store: OutreachStore, event: LearnEvent, lead: Lead | None
         pattern_id = latest.pattern_id if latest else None
     if pattern_id:
         _update_pattern(store, pattern_id, event.outcome)
+    try:
+        from self_improving_outreach.analytics.mixpanel import (
+            maybe_track_linkedin_connect_accepted,
+        )
+
+        maybe_track_linkedin_connect_accepted(event, lead, analytics=analytics)
+    except Exception:
+        logger.exception("Mixpanel linkedin_connect_accepted hook failed")
     return weights
 
 

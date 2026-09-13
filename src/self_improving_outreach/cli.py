@@ -48,6 +48,14 @@ chp_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(chp_app, name="chp")
+analytics_app = typer.Typer(
+    help=(
+        "Mixpanel analytics helpers. No consent gate. Does not send LinkedIn. "
+        "contact_submitted is site-only and is not implemented here."
+    ),
+    no_args_is_help=True,
+)
+app.add_typer(analytics_app, name="analytics")
 console = Console()
 
 
@@ -83,7 +91,11 @@ def learn(
     event: Optional[str] = typer.Option(None, help="JSON LearnEvent"),
     event_file: Optional[Path] = typer.Option(None),
 ) -> None:
-    """Apply a Scout outcome: thumbs_up/down, replied, meeting, ignore, sent."""
+    """Apply a Scout outcome: thumbs_up/down, replied, meeting, ignore, sent.
+
+    Set ``linkedin_connect_accepted`` (or notes) to fire Mixpanel's value
+    moment. This command does not send LinkedIn.
+    """
     if not event and not event_file:
         raise typer.BadParameter("Provide --event JSON or --event-file")
     payload = json.loads(event_file.read_text(encoding="utf-8") if event_file else event)
@@ -438,6 +450,87 @@ def _run_requeue(
 
 def _resolve_voice_lead(store, lead_id: str):
     return resolve_lead_from_sample(store, lead_id)
+
+
+@analytics_app.command("sign-up")
+def analytics_sign_up(
+    user_id: str = typer.Option(..., "--user-id", help="Stable operator/user pk (not email)"),
+    method: str = typer.Option("cli", "--method", help="sign_up_method (cli, operator, …)"),
+    platform: str = typer.Option("server", "--platform"),
+    referral_source: Optional[str] = typer.Option(None, "--referral-source"),
+) -> None:
+    """Record sign_up_completed when identity is first established.
+
+    This repo has no account-creation flow. Call this (or the Python helper)
+    when a stable operator pk is first known. Does not invent a signup path.
+    """
+    from self_improving_outreach.analytics.mixpanel import track_sign_up_completed
+
+    track_sign_up_completed(
+        sign_up_method=method,
+        platform=platform,
+        referral_source=referral_source,
+        user_id=user_id,
+    )
+    console.print(
+        {
+            "event": "sign_up_completed",
+            "user_id": user_id,
+            "sign_up_method": method,
+            "platform": platform,
+            "referral_source": referral_source,
+        }
+    )
+
+
+@analytics_app.command("identify")
+def analytics_identify(
+    user_id: str = typer.Option(..., "--user-id", help="Stable operator/user pk (not email)"),
+) -> None:
+    """identify(user_id) for a known operator. people.set only after identify."""
+    from self_improving_outreach.analytics.mixpanel import identify
+
+    ok = identify(user_id)
+    if not ok:
+        raise typer.BadParameter("identify refused (empty or email-shaped id)")
+    console.print({"identified": True, "user_id": user_id})
+
+
+@analytics_app.command("reset")
+def analytics_reset() -> None:
+    """Clear Mixpanel identity. This repo has no logout route; this is the hook."""
+    from self_improving_outreach.analytics.mixpanel import reset
+
+    reset()
+    console.print({"reset": True})
+
+
+@analytics_app.command("linkedin-connect-accepted")
+def analytics_linkedin_connect_accepted(
+    company: str = typer.Option(..., "--company"),
+    person_name: str = typer.Option(..., "--person-name"),
+    linkedin_url: str = typer.Option("", "--linkedin-url"),
+    batch_id: Optional[str] = typer.Option(None, "--batch-id"),
+) -> None:
+    """Value moment: a LinkedIn connection was accepted. Does not send LinkedIn."""
+    from self_improving_outreach.analytics.mixpanel import track_linkedin_connect_accepted
+
+    track_linkedin_connect_accepted(
+        company=company,
+        person_name=person_name,
+        linkedin_url=linkedin_url,
+        batch_id=batch_id,
+    )
+    console.print(
+        {
+            "event": "linkedin_connect_accepted",
+            "company": company,
+            "person_name": person_name,
+            "linkedin_url": linkedin_url or None,
+            "batch_id": batch_id,
+            "send": False,
+        }
+    )
 
 
 def _print_swarm(report) -> None:

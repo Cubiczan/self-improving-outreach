@@ -201,6 +201,9 @@ class LearnEvent(BaseModel):
     angle: Optional[str] = None
     features: dict[str, float] = Field(default_factory=dict)
     notes: str = ""
+    linkedin_connect_accepted: bool = False
+    linkedin_url: Optional[str] = None
+    batch_id: Optional[str] = None
 
 
 class SwarmReport(BaseModel):
